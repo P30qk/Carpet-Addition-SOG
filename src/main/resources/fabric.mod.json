@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "sog_carpet",
+  "version": "${version}",
+  "name": "carpet-SOG-addition",
+  "description": "Carpet 附属（SOG）：可配置的生存与生电辅助规则——禁铜自然生锈、禁冰融雪、禁雪生成、禁打雷、禁鸡骑士、精准采集强化深板岩与可疑方块、幽匿尖啸等级可调/锁定、禁坚守者生成、禁傻子村民生成与占床、信标附加效果、简易合成遮光玻璃/鞘翅/雪、剪刀不掉耐久、假人只拾取工具、假人渲染设置、Tweakeroo 灵活放置四角三角；并提供幽匿检测范围、嘎吱之心、末影龙寻路、末影龙破坏范围、凋灵破坏范围、刷怪游走、世吞小助手、爆炸等可视化（Ctrl+O 总开关，Ctrl+V 打开设置，Ctrl+E 打开世吞小助手方块清单）。本模组由 AI 制作，作者：WuLi_oi。GitHub：https://github.com/p30qk/Carpet-Addition-SOG",
+  "license": "MIT",
+  "authors": [
+    "WuLi_oi"
+  ],
+  "contact": {
+    "homepage": "https://github.com/p30qk/Carpet-Addition-SOG",
+    "sources": "https://github.com/p30qk/Carpet-Addition-SOG",
+    "issues": "https://github.com/p30qk/Carpet-Addition-SOG/issues"
+  },
+  "icon": "assets/sog_carpet/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "cn.blockforge.generated.sogcarpet.GeneratedMod"
+    ],
+    "client": [
+      "cn.blockforge.generated.sogcarpet.client.SogCarpetClient"
+    ]
+  },
+  "mixins": [
+    "sog_carpet.mixins.json",
+    {
+      "config": "sog_carpet.client.mixins.json",
+      "environment": "client"
+    },
+    {
+      "config": "sog_carpet.gca.mixins.json",
+      "environment": "*"
+    },
+    {
+      "config": "sog_carpet.tweakeroo.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~26.2",
+    "java": ">=25",
+    "fabric-api": "*",
+    "carpet": ">=26.2"
+  },
+  "recommends": {
+    "gca": "*"
+  },
+  "suggests": {
+    "tweakeroo": "*"
+  }
+}

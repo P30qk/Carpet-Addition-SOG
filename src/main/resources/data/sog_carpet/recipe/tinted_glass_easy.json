@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "building",
+  "key": {
+    "D": "minecraft:black_dye",
+    "G": "minecraft:glass"
+  },
+  "pattern": [
+    " D ",
+    "DGD",
+    " D "
+  ],
+  "result": {
+    "count": 1,
+    "id": "minecraft:tinted_glass"
+  }
+}
