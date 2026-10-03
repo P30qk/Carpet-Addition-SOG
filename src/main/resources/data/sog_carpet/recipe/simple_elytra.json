@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "key": {
+    "M": "minecraft:phantom_membrane",
+    "S": "minecraft:string"
+  },
+  "pattern": [
+    "MSM",
+    "MSM",
+    "MSM"
+  ],
+  "result": {
+    "count": 1,
+    "id": "minecraft:elytra"
+  }
+}

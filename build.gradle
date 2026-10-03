@@ -1,0 +1,39 @@
+plugins {
+    id 'net.fabricmc.fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+repositories { mavenCentral() }
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    // Carpet 是运行期依赖，只借它的 API 编译，不打包进本模组的 jar。
+    // 26.2 官方名无混淆，参考 jar 与目标依赖完全一致，可直接当编译依赖。
+    compileOnly files('libs/fabric-carpet-26.2_v260616.jar')
+}
+
+processResources {
+    inputs.property "version", project.version
+    // filter 同样按 filteringCharset 读写，不显式设成 UTF-8 时取平台默认
+    // （容器里常是 ASCII），会把 description 里的中文破坏成非法 UTF-8：
+    // Gradle 仍报 BUILD SUCCESSFUL，但最终 JAR 里的 JSON 已经坏了。
+    filteringCharset = 'UTF-8'
+    // 只替换版本占位符。Gradle expand 会把 JSON 字符串里的 \n 解释成真实换行，
+    // 造成源文件合法、最终 JAR 中 fabric.mod.json 却损坏。
+    filesMatching("fabric.mod.json") {
+        filter { line -> line.replace('${version}', project.version.toString()) }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach { options.release = 25; options.encoding = 'UTF-8' }
+java { toolchain.languageVersion = JavaLanguageVersion.of(25); withSourcesJar() }
+base { archivesName = project.archives_base_name }
+
+// MIT 许可正文随 jar 一起分发：Modrinth/CurseForge 等平台也按这里的声明识别许可。
+jar {
+    from('LICENSE') { into 'META-INF' }
+}
