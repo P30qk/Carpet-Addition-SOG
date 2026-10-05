@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "category": "building",
+  "ingredients": [
+    "minecraft:snow_block"
+  ],
+  "result": {
+    "count": 8,
+    "id": "minecraft:snow"
+  }
+}

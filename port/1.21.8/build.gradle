@@ -1,0 +1,34 @@
+plugins {
+    id 'fabric-loom' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+repositories { mavenCentral() }
+
+loom.enableModProvidedJavadoc = false
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    modCompileOnly files(project.carpet_jar)
+}
+
+processResources {
+    inputs.property "version", project.version
+    filteringCharset = 'UTF-8'
+    filesMatching("fabric.mod.json") {
+        filter { line -> line.replace('${version}', project.version.toString()) }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach { options.release = 21; options.encoding = 'UTF-8' }
+java { toolchain.languageVersion = JavaLanguageVersion.of(25); withSourcesJar() }
+base { archivesName = project.archives_base_name }
+
+jar {
+    from('LICENSE') { into 'META-INF' }
+}

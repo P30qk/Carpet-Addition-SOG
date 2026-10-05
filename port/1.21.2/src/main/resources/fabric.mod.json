@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "id": "sog_carpet",
+  "version": "${version}",
+  "name": "carpet-SOG-addition",
+  "description": "Carpet 附属（SOG）：可配置的生存与生电辅助规则——禁铜自然生锈、紫水晶芽/簇生长限制、禁冰融雪、禁雪生成、禁打雷、禁鸡骑士（幼年僵尸/溺尸/尸壳/僵尸村民/僵尸猪灵都不再生成鸡骑士变种）、精准采集强化深板岩与可疑方块、幽匿尖啸等级可调/锁定、禁坚守者生成、禁傻子村民生成与占床、信标附加效果、简易合成遮光玻璃/鞘翅/雪、剪刀不掉耐久、假人只拾取工具、假人渲染设置、Tweakeroo 灵活放置四角三角；并提供幽匿检测范围、嘎吱之心、末影龙寻路、末影龙破坏范围、凋灵破坏范围、刷怪游走、世吞小助手、爆炸、b36 目的地预览等可视化（Ctrl+O 总开关，Ctrl+V 打开设置，Ctrl+E 打开世吞小助手方块清单）。规则由服务端统一生效并随 carpet.conf 持久化，专用服务器可用；可视化与客户端开关由服务端同步给装了本模组的客户端，刷怪游走轨迹由客户端按生物真实移动逐 tick 采样绘制（服务端只在刷怪成功那一刻发一条出生事件，无人观看时完全不采集、只发给玩家附近明确要收的接收者），单机／局域网／专用服务器表现一致。可视化渲染清单按玩家逐份保存在服务端（/sogcarpet visualizer，玩家没装客户端模组也能由管理员配置），玩家之间互不影响。本模组由 AI 制作，作者：WuLi_oi。GitHub：https://github.com/p30qk/Carpet-Addition-SOG",
+  "license": "MIT",
+  "authors": [
+    "WuLi_oi"
+  ],
+  "contact": {
+    "homepage": "https://github.com/p30qk/Carpet-Addition-SOG",
+    "sources": "https://github.com/p30qk/Carpet-Addition-SOG",
+    "issues": "https://github.com/p30qk/Carpet-Addition-SOG/issues"
+  },
+  "icon": "assets/sog_carpet/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "cn.blockforge.generated.sogcarpet.GeneratedMod"
+    ],
+    "client": [
+      "cn.blockforge.generated.sogcarpet.client.SogCarpetClient"
+    ]
+  },
+  "mixins": [
+    "sog_carpet.mixins.json",
+    {
+      "config": "sog_carpet.client.mixins.json",
+      "environment": "client"
+    },
+    {
+      "config": "sog_carpet.gca.mixins.json",
+      "environment": "*"
+    },
+    {
+      "config": "sog_carpet.tweakeroo.mixins.json",
+      "environment": "client"
+    }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "~1.21.2",
+    "java": ">=21",
+    "fabric-api": "*",
+    "carpet": ">=1.4.158"
+  },
+  "recommends": {
+    "gca": "*"
+  },
+  "suggests": {
+    "tweakeroo": "*"
+  }
+}
