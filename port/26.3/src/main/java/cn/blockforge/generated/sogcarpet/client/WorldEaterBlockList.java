@@ -278,7 +278,8 @@ public final class WorldEaterBlockList extends AbstractWidget {
         if (!this.active || !this.visible || !isMouseOver(event.x(), event.y())) {
             return false;
         }
-        if (event.button() == 0 && overScrollbar(event.x(), event.y())) {
+        // 26.3 的左键是 SDL 编号 1（GLFW 时代是 0），见 SogMouseButtons。
+        if (SogMouseButtons.isLeft(event) && overScrollbar(event.x(), event.y())) {
             Columns c = columns();
             int trackTop = getY() + 1;
             int trackHeight = this.height - 2;

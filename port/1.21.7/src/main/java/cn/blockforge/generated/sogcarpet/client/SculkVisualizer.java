@@ -1,17 +1,24 @@
 package cn.blockforge.generated.sogcarpet.client;
 
+import cn.blockforge.generated.sogcarpet.net.SculkTriggerPayload;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import cn.blockforge.generated.sogcarpet.client.gizmo.GizmoStyle;
+import cn.blockforge.generated.sogcarpet.client.gizmo.Gizmos;
+import cn.blockforge.generated.sogcarpet.client.gizmo.TextGizmo;
 import net.minecraft.tags.BlockTags;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.monster.warden.Warden;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.SculkShriekerBlock;
@@ -89,10 +96,11 @@ public final class SculkVisualizer {
 
     static {
         for (int i = 0; i <= SPHERE_LATITUDES; i++) {
-            // 纬度从 -90°（南极）均匀走到 +90°（北极）。
+            // 纬度从 -90°（南极）均匀走到 +90°（北极）。几何按单位球算（半径 1），
+            // 绘制时再乘各自的半径——感测体是 8 格，坚守者是 16 格，同一个球壳复用。
             double latitude = -Math.PI / 2.0D + Math.PI * i / SPHERE_LATITUDES;
-            double ringRadius = Math.cos(latitude) * LISTENER_RANGE;
-            double ringY = Math.sin(latitude) * LISTENER_RANGE;
+            double ringRadius = Math.cos(latitude);
+            double ringY = Math.sin(latitude);
             for (int j = 0; j < SPHERE_LONGITUDES; j++) {
                 double longitude = 2.0D * Math.PI * j / SPHERE_LONGITUDES;
                 SPHERE_RINGS[i][j] = new Vec3(ringRadius * Math.cos(longitude), ringY,
@@ -121,10 +129,10 @@ public final class SculkVisualizer {
     private static final int UNREACHABLE = Integer.MAX_VALUE / 2;
 
     // 状态的基准色（这里都写满不透明的 RGB，实际 alpha 由下面几个常量决定）。
-    private static final int COLOR_SENSOR_CHAIN = 0xFF3CE04A;
-    private static final int COLOR_SHRIEKER_CHAIN = 0xFFFF3B30;
-    private static final int COLOR_BLOCKED = 0xFFFFE14D;
-    private static final int COLOR_UNSPAWNABLE = 0xFFFFFFFF;
+    private static int COLOR_SENSOR_CHAIN = 0xFF3CE04A;
+    private static int COLOR_SHRIEKER_CHAIN = 0xFFFF3B30;
+    private static int COLOR_BLOCKED = 0xFFFFE14D;
+    private static int COLOR_UNSPAWNABLE = 0xFFFFFFFF;
     private static final int COLOR_UNSPAWNABLE_BLOCKED = 0xFF9E9E9E;
 
     // 连线的 alpha 特意压到 255 以下：这样线会落进“半透明组”，而一帧里半透明组
@@ -136,7 +144,7 @@ public final class SculkVisualizer {
 
     // 实心检测球的填充色（半透明的淡色）。只画正对镜头的那半边（见 drawBall），
     // 每条视线只穿过一层，所以单个 alpha 就是最终观感；不同视角颜色保持一致。
-    private static final int BALL_DEFAULT = 0x6666CCFF;
+    private static int BALL_DEFAULT = 0x6666CCFF;
     private static final int BALL_RED = 0x66FF8A8A;
     private static final int BALL_YELLOW = 0x66FFE98A;
     // 连到“不能召唤”的尖啸体的感测体（含校频感测体），检测球用纯白，且 alpha 明显低于
@@ -144,6 +152,31 @@ public final class SculkVisualizer {
     // 那层颜色更淡，这样白色方框才是整片白雾里最清楚的那一层。
     private static final int BALL_WHITE = 0x55FFFFFF;
     private static final int BALL_GRAY = 0x66BDBDBD;
+
+    // 坚守者：它自己也是一个振动监听者，原版监听半径 16 格。这里把它当成幽匿网络里的一个特殊节点，
+    // 画出它的监测范围，并在它和范围内每个感测体（检测体）之间连一条线。配色用一支专属青色，
+    // 与感测体链的红/白/绿区分开；透明度、线宽、立方体风格都沿用上面“原有方案”的同一套参数。
+    private static final double WARDEN_LISTENER_RANGE = 16.0D;
+    private static int COLOR_WARDEN = 0xFF2FD6C8;
+    private static final int BALL_WARDEN = 0x662FD6C8;
+
+    // 警告标志：与坚守者相连的感测体上方，以及坚守者/这些感测体的检测球面上，画橙色警告符号。
+    // 用标准警告符号 U+26A0（⚠，原版 26.2 自带字体含该字形），可以稳定渲染。
+    private static int COLOR_WARNING = 0xFFFF8A1E;
+    private static final String WARNING_SYMBOL = "\u26A0";
+    private static final float WARNING_LABEL_SCALE = 1.4F;
+    /** 球面警告的分布密度系数：标记数≈半径×该系数（再夹到 12~48）。 */
+    private static final double WARNING_DENSITY = 2.0D;
+    /** 方块上方警告标志的高度；球面上的警告标志从球面再往外挪 {@link #WARNING_BALL_Y}。 */
+    private static final double WARNING_BLOCK_Y = 1.25D;
+    private static final double WARNING_BALL_Y = 0.45D;
+
+    // 触发判定线：感测体/坚守者收到声音时，把声音源与它连一条亮品红的线，短暂显示后淡出。
+    private static int COLOR_TRIGGER = 0xFFFF3AD8;
+    /** 声音源是玩家时，触发判定线改画成红色（与玩家相连的线统一红色）。 */
+    private static final int COLOR_TRIGGER_PLAYER = 0xFFFF3B30;
+    private static final long TRIGGER_TTL_MILLIS = 1200L;
+    private static final int MAX_TRIGGERS = 512;
 
     // 节点方块改成半透明实心立方体：色相还是各自状态的线色，填色比球浓一档，
     // 再加一圈几乎不透明的描边，六个棱在各角度都清清楚楚。
@@ -159,7 +192,25 @@ public final class SculkVisualizer {
     private static volatile Snapshot snapshot = Snapshot.EMPTY;
     private static int tickCounter;
 
+    /** 最近收到的“声音检测触发”事件；收包线程 add、tick 线程清理、渲染线程只读。 */
+    private static final List<Trigger> TRIGGERS = new CopyOnWriteArrayList<>();
+
     private SculkVisualizer() {
+    }
+
+    /** 网络包接收器（{@code SculkTriggerPayload}）送来的振动触发事件，只在收包线程登记时间戳。 */
+    public static void accept(SculkTriggerPayload payload) {
+        if (payload == null || payload.entries().isEmpty()) {
+            return;
+        }
+        long expireAt = System.currentTimeMillis() + TRIGGER_TTL_MILLIS;
+        for (SculkTriggerPayload.Entry entry : payload.entries()) {
+            TRIGGERS.add(new Trigger(Vec3.atCenterOf(entry.source()),
+                    Vec3.atCenterOf(entry.receiver()), expireAt));
+        }
+        while (TRIGGERS.size() > MAX_TRIGGERS) {
+            TRIGGERS.remove(0);
+        }
     }
 
     /** 客户端入口调用一次：tick 扫描与渲染回调（Ctrl+O 总开关在 {@link VisualizerState}）。 */
@@ -171,8 +222,11 @@ public final class SculkVisualizer {
     private static void clientTick(Minecraft client) {
         if (!VisualizerState.isActive(RULE)) {
             snapshot = Snapshot.EMPTY;
+            TRIGGERS.clear();
             return;
         }
+        long now = System.currentTimeMillis();
+        TRIGGERS.removeIf(trigger -> trigger.expireAt <= now);
         Player player = client.player;
         Level level = client.level;
         if (player == null || !(level instanceof ClientLevel)) {
@@ -222,12 +276,25 @@ public final class SculkVisualizer {
                 }
             }
         }
-        return buildSnapshot(nodes, level);
+        // 坚守者不是方块实体，单独从实体表里收集：只要在扫描范围内就记下它的方块位置，
+        // 稍后画它的监测范围，并连到范围内的感测体。
+        List<WardenNode> wardens = new ArrayList<>();
+        for (Entity entity : level.entitiesForRendering()) {
+            if (!(entity instanceof Warden warden) || warden.isRemoved()) {
+                continue;
+            }
+            BlockPos pos = warden.blockPosition();
+            if (center.distSqr(pos) > MAX_DISTANCE_SQR) {
+                continue;
+            }
+            wardens.add(new WardenNode(pos.immutable()));
+        }
+        return buildSnapshot(nodes, wardens, level);
     }
 
-    private static Snapshot buildSnapshot(List<Node> nodes, Level level) {
+    private static Snapshot buildSnapshot(List<Node> nodes, List<WardenNode> wardens, Level level) {
         int count = nodes.size();
-        if (count == 0) {
+        if (count == 0 && wardens.isEmpty()) {
             return Snapshot.EMPTY;
         }
         // 1) 两两距离在检测半径内的节点视为“可传递”，连一条边；
@@ -263,11 +330,42 @@ public final class SculkVisualizer {
         int[] openSpawnable = hopDistances(nodes, adjacency, edgeBlocked, true, true);
         int[] openUnspawnable = hopDistances(nodes, adjacency, edgeBlocked, false, true);
 
-        // 4) 节点级别：能生成坚守者的一侧优先级更高。
+        // 4) 坚守者连接：先算出哪些感测体与坚守者相连。它们的球与框统一走坚守者色，
+        //    优先级高于一切尖啸体链，所以要在定级之前先算出来。每条坚守者→感测体的连线
+        //    也照尖啸体链那套检查羊毛阻挡：被挡住的那条线、以及通往坚守者的线全被挡住的
+        //    节点，后面都改用“变黄”的阻挡态渲染。
+        double wardenRangeSqr = WARDEN_LISTENER_RANGE * WARDEN_LISTENER_RANGE + 0.5D;
+        boolean[] wardenLinked = new boolean[count];
+        boolean[] wardenOpen = new boolean[count];
+        boolean[][] linkBlocked = new boolean[wardens.size()][count];
+        boolean[] wardenHasLink = new boolean[wardens.size()];
+        boolean[] wardenHasOpen = new boolean[wardens.size()];
+        for (int w = 0; w < wardens.size(); w++) {
+            for (int i = 0; i < count; i++) {
+                Node node = nodes.get(i);
+                if (node.shrieker || wardens.get(w).pos.distSqr(node.pos) > wardenRangeSqr) {
+                    continue;
+                }
+                boolean isBlocked = blockedByWool(level, wardens.get(w).pos, node.pos);
+                linkBlocked[w][i] = isBlocked;
+                wardenLinked[i] = true;
+                wardenHasLink[w] = true;
+                if (!isBlocked) {
+                    wardenOpen[i] = true;
+                    wardenHasOpen[w] = true;
+                }
+            }
+        }
+
+        // 4.1) 节点级别：坚守者 > 能生成坚守者的一侧 > 不能生成的一侧 > 纯感测体。
+        //      与坚守者相连的感测体，若通往坚守者的线全被羊毛挡住，也按阻挡态（变黄）渲染。
         ChainLevel[] levels = new ChainLevel[count];
         boolean[] blocked = new boolean[count];
         for (int i = 0; i < count; i++) {
-            if (distSpawnable[i] != UNREACHABLE) {
+            if (wardenLinked[i]) {
+                levels[i] = ChainLevel.WARDEN;
+                blocked[i] = !wardenOpen[i];
+            } else if (distSpawnable[i] != UNREACHABLE) {
                 levels[i] = ChainLevel.SPAWNABLE;
                 blocked[i] = openSpawnable[i] == UNREACHABLE;
             } else if (distUnspawnable[i] != UNREACHABLE) {
@@ -296,12 +394,14 @@ public final class SculkVisualizer {
 
         List<Sphere> spheres = new ArrayList<>();
         List<Marked> blocks = new ArrayList<>();
+        List<Warning> warnings = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             Node node = nodes.get(i);
             boolean boxBlocked = node.shrieker ? (hasEdge[i] && !hasOpenEdge[i]) : blocked[i];
             blocks.add(new Marked(node.pos, boxColor(node, levels[i], boxBlocked)));
             if (!node.shrieker) {
-                spheres.add(new Sphere(Vec3.atCenterOf(node.pos), ballColor(levels[i], blocked[i])));
+                spheres.add(new Sphere(Vec3.atCenterOf(node.pos), LISTENER_RANGE,
+                        ballColor(levels[i], blocked[i])));
             }
         }
 
@@ -325,7 +425,58 @@ public final class SculkVisualizer {
                     Vec3.atCenterOf(nodes.get(edge[1]).pos),
                     withAlpha(lineColor(edgeLevel, edgeBlocked[e]), LINE_ALPHA)));
         }
-        return new Snapshot(spheres, segments, blocks);
+
+        // 6) 坚守者：它自己也是一个振动监听者，监测半径 16 格。给它画一个专属青色的检测球、
+        //    在它所在方块罩一个立方体，并把它和 16 格内每个感测体（检测体）连线；不连尖啸体。
+        //    这些都不进上面的 BFS 图，因此不会影响感测体链原本的红/白/绿判定。
+        for (int w = 0; w < wardens.size(); w++) {
+            Vec3 wardenCenter = Vec3.atCenterOf(wardens.get(w).pos);
+            // 坚守者自己：从它出发的每一条连线都被羊毛挡住时，整颗球与框也转成阻挡色（黄）。
+            boolean wardenBlocked = wardenHasLink[w] && !wardenHasOpen[w];
+            spheres.add(new Sphere(wardenCenter, WARDEN_LISTENER_RANGE,
+                    wardenBlocked ? BALL_YELLOW : BALL_WARDEN));
+            blocks.add(new Marked(wardens.get(w).pos, wardenBlocked ? COLOR_BLOCKED : COLOR_WARDEN));
+            addBallWarnings(wardenCenter, WARDEN_LISTENER_RANGE, warnings);
+            for (int i = 0; i < count; i++) {
+                Node node = nodes.get(i);
+                if (node.shrieker || wardens.get(w).pos.distSqr(node.pos) > wardenRangeSqr) {
+                    continue;
+                }
+                segments.add(new Segment(wardenCenter, Vec3.atCenterOf(node.pos),
+                        withAlpha(linkBlocked[w][i] ? COLOR_BLOCKED : COLOR_WARDEN, LINE_ALPHA)));
+            }
+        }
+        // 与坚守者相连的感测体：方块上方一个警告标志，检测球面上的警告均匀分布。
+        for (int i = 0; i < count; i++) {
+            if (!wardenLinked[i]) {
+                continue;
+            }
+            Vec3 center = Vec3.atCenterOf(nodes.get(i).pos);
+            warnings.add(new Warning(center.add(0.0D, WARNING_BLOCK_Y, 0.0D),
+                    WARNING_SYMBOL, COLOR_WARNING));
+            addBallWarnings(center, LISTENER_RANGE, warnings);
+        }
+        return new Snapshot(spheres, segments, blocks, warnings);
+    }
+
+    /**
+     * 把警告标志均匀撒在球面上（Fibonacci 球分布）：沿球面取 {@code N} 个近似等距的点，
+     * 每个点从球面再往外挪一点后放一个标准警告符号 ⚠。{@code N} 取“半径 × {@link #WARNING_DENSITY}”
+     * 再夹到 12~48（感测体球约 16 个、坚守者球约 32 个），比之前更密，从任何角度看球面上的
+     * 警告都是均匀铺开的。
+     */
+    private static void addBallWarnings(Vec3 center, double radius, List<Warning> out) {
+        int markers = (int) Math.max(12.0D,
+                Math.min(48.0D, Math.round(radius * WARNING_DENSITY)));
+        double golden = Math.PI * (1.0D + Math.sqrt(5.0D));
+        double r = radius + WARNING_BALL_Y;
+        for (int k = 0; k < markers; k++) {
+            double y = 1.0D - 2.0D * (k + 0.5D) / markers;
+            double ring = Math.sqrt(Math.max(0.0D, 1.0D - y * y));
+            double theta = golden * k;
+            Vec3 direction = new Vec3(Math.cos(theta) * ring, y, Math.sin(theta) * ring);
+            out.add(new Warning(center.add(direction.scale(r)), WARNING_SYMBOL, COLOR_WARNING));
+        }
     }
 
     /** 把满不透明的基础色换成指定 alpha 的 ARGB。 */
@@ -336,6 +487,8 @@ public final class SculkVisualizer {
     /** 连线颜色：被羊毛挡住时，通往能生成 / 不能生成的尖啸体分别转黄 / 灰。 */
     private static int lineColor(ChainLevel level, boolean blocked) {
         switch (level) {
+            case WARDEN:
+                return blocked ? COLOR_BLOCKED : COLOR_WARDEN;
             case SPAWNABLE:
                 return blocked ? COLOR_BLOCKED : COLOR_SHRIEKER_CHAIN;
             case UNSPAWNABLE:
@@ -348,6 +501,8 @@ public final class SculkVisualizer {
     /** 实心检测球的颜色，与连线同一套状态。 */
     private static int ballColor(ChainLevel level, boolean blocked) {
         switch (level) {
+            case WARDEN:
+                return blocked ? BALL_YELLOW : BALL_WARDEN;
             case SPAWNABLE:
                 return blocked ? BALL_YELLOW : BALL_RED;
             case UNSPAWNABLE:
@@ -430,23 +585,44 @@ public final class SculkVisualizer {
         for (int s = 0; s <= steps; s++) {
             double t = s / (double) steps;
             BlockPos pos = BlockPos.containing(ax + dx * t, ay + dy * t, az + dz * t);
-            if (level.getBlockState(pos).is(BlockTags.WOOL)) {
+            if (level.getBlockState(pos).getBlockHolder().is(BlockTags.WOOL)) {
                 return true;
             }
         }
         return false;
     }
 
+    /** 从用户配置刷新本规则的配色；每帧渲染前调用一次，允许运行时改色。 */
+    private static void refreshColors() {
+        COLOR_SENSOR_CHAIN = VisualizerConfig.color("sculkRangeVisualizer", "sensorChain", 0xFF3CE04A);
+        COLOR_SHRIEKER_CHAIN = VisualizerConfig.color("sculkRangeVisualizer", "shriekerChain", 0xFFFF3B30);
+        COLOR_BLOCKED = VisualizerConfig.color("sculkRangeVisualizer", "blocked", 0xFFFFE14D);
+        COLOR_UNSPAWNABLE = VisualizerConfig.color("sculkRangeVisualizer", "unspawnable", 0xFFFFFFFF);
+        COLOR_WARDEN = VisualizerConfig.color("sculkRangeVisualizer", "warden", 0xFF2FD6C8);
+        COLOR_WARNING = VisualizerConfig.color("sculkRangeVisualizer", "warning", 0xFFFF8A1E);
+        COLOR_TRIGGER = VisualizerConfig.color("sculkRangeVisualizer", "trigger", 0xFFFF3AD8);
+        BALL_DEFAULT = VisualizerConfig.color("sculkRangeVisualizer", "ballDefault", 0x6666CCFF);
+    }
+
     private static void renderGizmos(WorldRenderContext context) {
         if (!VisualizerState.isActive(RULE)) {
             return;
         }
+        refreshColors();
         Snapshot current = snapshot;
-        if (current.isEmpty()) {
+        long now = System.currentTimeMillis();
+        boolean hasTriggers = false;
+        for (int i = 0; i < TRIGGERS.size(); i++) {
+            if (TRIGGERS.get(i).expireAt > now) {
+                hasTriggers = true;
+                break;
+            }
+        }
+        if (current.isEmpty() && !hasTriggers) {
             return;
         }
         try (Gizmos.TemporaryCollection collection = Gizmos.begin(context)) {
-            Vec3 camera = Minecraft.getInstance().gameRenderer.getMainCamera().position();
+            Vec3 camera = Minecraft.getInstance().gameRenderer.getMainCamera().getPosition();
             for (int i = 0; i < current.spheres.size(); i++) {
                 drawBall(current.spheres.get(i), camera);
             }
@@ -463,7 +639,32 @@ public final class SculkVisualizer {
                 Segment segment = current.segments.get(i);
                 Gizmos.line(segment.from, segment.to, segment.color, LINE_WIDTH);
             }
+            // 警告标志：与坚守者相连的感测体方块上方、以及坚守者/这些感测体的球顶，各一个“!”。
+            for (int i = 0; i < current.warnings.size(); i++) {
+                Warning warning = current.warnings.get(i);
+                Gizmos.billboardText(warning.text, warning.pos,
+                        TextGizmo.Style.forColor(warning.color).withScale(WARNING_LABEL_SCALE));
+            }
+            // 触发判定线：声音源 → 检测体，随剩余寿命淡出。
+            for (int i = 0; i < TRIGGERS.size(); i++) {
+                Trigger trigger = TRIGGERS.get(i);
+                long remaining = trigger.expireAt - now;
+                if (remaining <= 0L) {
+                    continue;
+                }
+                float alpha = Math.max(0.0F, Math.min(1.0F, remaining / (float) TRIGGER_TTL_MILLIS));
+                // 与玩家相连的触发判定线统一红色，便于一眼看出是自己触发的振动。
+                int color = triggerNearPlayer(trigger) ? COLOR_TRIGGER_PLAYER : COLOR_TRIGGER;
+                Gizmos.line(trigger.source, trigger.receiver,
+                        withAlpha(color, Math.round(alpha * 255.0F)), LINE_WIDTH);
+            }
         }
+    }
+
+    /** 这次触发的声音源是不是就在本地玩家身边（与玩家相连的判定线画成红色）。 */
+    private static boolean triggerNearPlayer(Trigger trigger) {
+        Player player = Minecraft.getInstance().player;
+        return player != null && player.getBoundingBox().inflate(1.0D).contains(trigger.source);
     }
 
     /**
@@ -475,33 +676,39 @@ public final class SculkVisualizer {
      */
     private static void drawBall(Sphere sphere, Vec3 camera) {
         GizmoStyle style = GizmoStyle.fill(sphere.color);
-        boolean inside = camera.distanceToSqr(sphere.center) <= LISTENER_RANGE * LISTENER_RANGE;
+        double radius = sphere.radius;
+        // 球壳几何是单位球，这里按这个球自己的半径缩放（感测体 8 格、坚守者 16 格）。
+        boolean inside = camera.distanceToSqr(sphere.center) <= radius * radius;
         for (int band = 0; band < SPHERE_LATITUDES; band++) {
             Vec3[] lower = SPHERE_RINGS[band];
             Vec3[] upper = SPHERE_RINGS[band + 1];
             for (int j = 0; j < SPHERE_LONGITUDES; j++) {
                 if (!inside) {
-                    Vec3 quadCenter = sphere.center.add(SPHERE_QUAD_CENTERS[band][j]);
+                    Vec3 quadCenter = sphere.center.add(SPHERE_QUAD_CENTERS[band][j].scale(radius));
                     if (SPHERE_QUAD_NORMALS[band][j].dot(camera.subtract(quadCenter)) <= 0.0D) {
                         continue;
                     }
                 }
                 int next = (j + 1) % SPHERE_LONGITUDES;
                 // 四个角点按“逆时针朝外”的顺序给，正对镜头的一面才画得出来。
-                Gizmos.rect(sphere.center.add(lower[j]), sphere.center.add(upper[j]),
-                        sphere.center.add(upper[next]), sphere.center.add(lower[next]), style);
+                Gizmos.rect(sphere.center.add(lower[j].scale(radius)),
+                        sphere.center.add(upper[j].scale(radius)),
+                        sphere.center.add(upper[next].scale(radius)),
+                        sphere.center.add(lower[next].scale(radius)), style);
             }
         }
     }
 
-    /** 一个节点（或一条连线）归属的级别：能召唤的尖啸体 &gt; 不能召唤的尖啸体 &gt; 纯感测体。 */
+    /** 一个节点（或一条连线）归属的级别：坚守者 &gt; 能召唤的尖啸体 &gt; 不能召唤的尖啸体 &gt; 纯感测体。 */
     private enum ChainLevel {
         /** 纯感测体链（含孤立感测体）：绿线，检测球保持默认淡蓝。 */
         SENSOR_ONLY,
+        /** 不能生成坚守者的尖啸体一侧：白线，检测球浅白；被羊毛挡住转灰线、浅灰球。 */
+        UNSPAWNABLE,
         /** 能生成坚守者的尖啸体一侧：红线，检测球淡红；被羊毛挡住转黄线、淡黄球。 */
         SPAWNABLE,
-        /** 不能生成坚守者的尖啸体一侧：白线，检测球浅白；被羊毛挡住转灰线、浅灰球。 */
-        UNSPAWNABLE
+        /** 与坚守者相连：整颗检测球与框都统一用坚守者那支青色，优先级最高。 */
+        WARDEN
     }
 
     /** 一个节点：感测体，或尖啸体（记录它当时能否生成坚守者）。 */
@@ -517,14 +724,25 @@ public final class SculkVisualizer {
         }
     }
 
-    /** 一个实心检测球：球心 + 填充色。 */
+    /** 一个实心检测球：球心 + 半径 + 填充色（感测体 8 格、坚守者 16 格）。 */
     private static final class Sphere {
         private final Vec3 center;
+        private final double radius;
         private final int color;
 
-        private Sphere(Vec3 center, int color) {
+        private Sphere(Vec3 center, double radius, int color) {
             this.center = center;
+            this.radius = radius;
             this.color = color;
+        }
+    }
+
+    /** 一个坚守者节点：只记它所在的方块位置（监测半径固定为 {@link #WARDEN_LISTENER_RANGE}）。 */
+    private static final class WardenNode {
+        private final BlockPos pos;
+
+        private WardenNode(BlockPos pos) {
+            this.pos = pos;
         }
     }
 
@@ -552,23 +770,54 @@ public final class SculkVisualizer {
         }
     }
 
+    /** 一个警告标志：世界坐标 + 文字 + 颜色，用面向镜头的文字绘制。 */
+    private static final class Warning {
+        private final Vec3 pos;
+        private final String text;
+        private final int color;
+
+        private Warning(Vec3 pos, String text, int color) {
+            this.pos = pos;
+            this.text = text;
+            this.color = color;
+        }
+    }
+
+    /** 一条触发判定线：声音源 → 检测体，带过期时间（毫秒）。 */
+    private static final class Trigger {
+        private final Vec3 source;
+        private final Vec3 receiver;
+        private final long expireAt;
+
+        private Trigger(Vec3 source, Vec3 receiver, long expireAt) {
+            this.source = source;
+            this.receiver = receiver;
+            this.expireAt = expireAt;
+        }
+    }
+
     /** 只读渲染快照，tick 线程整体替换、渲染线程整体读取。 */
     private static final class Snapshot {
         private static final Snapshot EMPTY = new Snapshot(Collections.<Sphere>emptyList(),
-                Collections.<Segment>emptyList(), Collections.<Marked>emptyList());
+                Collections.<Segment>emptyList(), Collections.<Marked>emptyList(),
+                Collections.<Warning>emptyList());
 
         private final List<Sphere> spheres;
         private final List<Segment> segments;
         private final List<Marked> blocks;
+        private final List<Warning> warnings;
 
-        private Snapshot(List<Sphere> spheres, List<Segment> segments, List<Marked> blocks) {
+        private Snapshot(List<Sphere> spheres, List<Segment> segments, List<Marked> blocks,
+                List<Warning> warnings) {
             this.spheres = spheres;
             this.segments = segments;
             this.blocks = blocks;
+            this.warnings = warnings;
         }
 
         private boolean isEmpty() {
-            return this.spheres.isEmpty() && this.segments.isEmpty() && this.blocks.isEmpty();
+            return this.spheres.isEmpty() && this.segments.isEmpty() && this.blocks.isEmpty()
+                    && this.warnings.isEmpty();
         }
     }
 }

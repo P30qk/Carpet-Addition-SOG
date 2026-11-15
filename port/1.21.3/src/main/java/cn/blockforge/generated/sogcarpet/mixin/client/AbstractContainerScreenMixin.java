@@ -6,6 +6,7 @@ import cn.blockforge.generated.sogcarpet.client.FakeRenderHelpWidget;
 import cn.blockforge.generated.sogcarpet.client.SogFakeRenderState;
 import cn.blockforge.generated.sogcarpet.client.SogFakeToolsState;
 import cn.blockforge.generated.sogcarpet.client.VerticalDistanceSlider;
+import cn.blockforge.generated.sogcarpet.client.WorldEaterHelperVisualizer;
 import cn.blockforge.generated.sogcarpet.net.FakeRenderInfoPayload;
 import cn.blockforge.generated.sogcarpet.net.FakeRenderSetPayload;
 import cn.blockforge.generated.sogcarpet.net.FakeToolsInfoPayload;
@@ -22,6 +23,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * 在 GCA 假人背包界面左侧加入渲染距离/模拟距离两条竖向滑条。
@@ -162,5 +164,47 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         int render = isRender ? value : pair[0] == null ? info.render() : pair[0].sog$getValue();
         int simulation = isRender ? pair[1] == null ? info.simulation() : pair[1].sog$getValue() : value;
         ClientPlayNetworking.send(new FakeRenderSetPayload(info.fake(), render, simulation));
+    }
+
+    /**
+     * 把鼠标拖动转给“按下去的那条滑条”。
+     *
+     * <p>1.21 ~ 1.21.8 的 {@code AbstractContainerScreen#mouseDragged} 无论点在哪都直接
+     * {@code return true}，从不调用 {@code super.mouseDragged(...)}，所以原版“交给焦点控件”的
+     * 分发在容器界面里被整条掐断。这里在方法开头补一次转发：按在滑条上就更新数值并吞掉事件，
+     * 其余情况照旧交给原版（背包里拖动物品不受影响）。</p>
+     */
+    @Inject(method = "mouseDragged", at = @At("HEAD"), cancellable = true)
+    private void sog$forwardDragToSlider(double mouseX, double mouseY, int button, double dragX,
+            double dragY, CallbackInfoReturnable<Boolean> cir) {
+        if (button != 0) {
+            return;
+        }
+        VerticalDistanceSlider slider = VerticalDistanceSlider.sog$draggingSlider();
+        if (slider != null && slider.sog$dragTo(mouseX, mouseY)) {
+            cir.setReturnValue(Boolean.TRUE);
+        }
+    }
+
+    /** 鼠标松开时结束拖动，避免下一次拖动“粘”在上一条滑条上。 */
+    @Inject(method = "mouseReleased", at = @At("HEAD"))
+    private void sog$endSliderDrag(double mouseX, double mouseY, int button,
+            CallbackInfoReturnable<Boolean> cir) {
+        VerticalDistanceSlider.sog$stopDragging();
+    }
+
+    /**
+     * Ctrl+E 打开世吞小助手的配置界面，<b>即使物品栏（或任何容器界面）开着</b>。
+     *
+     * <p>界面开着时原版根本不派发 {@code KeyMapping} 点击，而 {@code AbstractContainerScreen#keyPressed}
+     * 又会把 E 当成“关闭界面”吃掉，于是 Ctrl+E 只会关掉物品栏、配置界面永远打不开。
+     * 这里在容器界面处理按键之前先把 Ctrl+E 接过来。</p>
+     */
+    @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
+    private void sog$ctrlEOpensWorldEaterConfig(int keyCode, int scanCode, int modifiers,
+            CallbackInfoReturnable<Boolean> cir) {
+        if (WorldEaterHelperVisualizer.sog$openConfigFromKey(keyCode, scanCode)) {
+            cir.setReturnValue(Boolean.TRUE);
+        }
     }
 }

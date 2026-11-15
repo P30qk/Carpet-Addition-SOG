@@ -22,8 +22,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 给 carpet 假人挂上每假人独立的渲染/模拟距离设置。
  *
  * <p>渲染距离走原版按玩家生效的 requestedViewDistance（{@link ServerPlayer#updateOptions}），
- * 并额外补一张 PLAYER_LOADING 区域票把假人周围的加载半径向外扩展；模拟距离补一张
- * PLAYER_SIMULATION 区域票。原版给玩家的票据按全局半径发放、无法按玩家缩小，
+ * 并额外补 PLAYER_LOADING / PLAYER_SIMULATION 两张区域票把假人周围的加载与模拟半径向外扩展。
+ * 原版给玩家的票据按全局半径发放、无法按玩家缩小，
  * 因此这两个滑条的语义是“在玩家默认值基础上扩展”，低于默认值时以默认值为准。</p>
  *
  * <p><b>“跟随玩家”的实现</b>：两个字段用包装类型，{@code null} 即跟随。跟随状态既
@@ -53,8 +53,8 @@ public abstract class EntityPlayerMPFakeMixin extends ServerPlayer implements So
     private int sog$ticketCx;
     private int sog$ticketCz;
     private boolean sog$loadTicketOn;
-    private int sog$loadTicketRadius;
     private boolean sog$simTicketOn;
+    private int sog$loadTicketRadius;
     private int sog$simTicketRadius;
 
     // Mixin 要求混入类的构造器与目标的一个构造器签名完全一致（它不会被合并，
@@ -114,7 +114,7 @@ public abstract class EntityPlayerMPFakeMixin extends ServerPlayer implements So
 
     /** 尚未单独设置时把假人视距对齐到服务器视距（单机下即玩家自己的渲染距离）。 */
     private void sog$applyFollowViewDistance() {
-        ServerLevel level = this.level();
+        ServerLevel level = (ServerLevel) this.level();
         if (level == null) {
             return;
         }
@@ -139,9 +139,10 @@ public abstract class EntityPlayerMPFakeMixin extends ServerPlayer implements So
         if (render < 0 && simulation < 0) {
             return;
         }
-        ServerLevel level = this.level();
+        ServerLevel level = (ServerLevel) this.level();
         ChunkPos pos = this.chunkPosition();
         ServerChunkCache source = level.getChunkSource();
+        // 1.21.5 起票据按“加载 / 模拟”拆成两种，和 1.21.9 一致，两个滑条各挂一张。
         if (render >= 0) {
             source.addTicketWithRadius(TicketType.PLAYER_LOADING, pos, render);
             this.sog$loadTicketOn = true;

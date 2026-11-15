@@ -7,9 +7,14 @@
     "defaultRequire": 1
   },
   "client": [
+    "KeyboardHandlerMixin",
     "AbstractContainerScreenMixin",
+    "BeaconScreenMixin",
     "CreakingHurtMixin",
+    "EntityAddDeltaMovementMixin",
     "FriendsKeyGuardMixin",
-    "PistonHeadRendererMixin"
+    "LevelRendererMixin",
+    "PistonHeadRendererMixin",
+    "PlayerTabOverlayMixin"
   ]
 }

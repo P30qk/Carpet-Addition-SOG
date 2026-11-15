@@ -10,9 +10,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import cn.blockforge.generated.sogcarpet.client.render.WorldRenderContext;
+import cn.blockforge.generated.sogcarpet.client.render.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import cn.blockforge.generated.sogcarpet.client.gizmo.GizmoStyle;
+import cn.blockforge.generated.sogcarpet.client.gizmo.Gizmos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
@@ -84,13 +88,13 @@ public final class EnderDragonPathVisualizer {
      * （255, 0, 118，alpha 240）——路径在反向飞行时换成反色，客户端这边只记录龙自己的轨迹，
      * 没有方向信息，统一用正向色。alpha 压在 255 以下，落进半透明组，保证叠在节点方块之后画。</p>
      */
-    private static final int COLOR_TRAIL = 0xF0FF0076;
+    private static int COLOR_TRAIL = 0xF0FF0076;
     /** 龙当前位置的圆点（黄）。 */
-    private static final int COLOR_TIP = 0xFFFFE14D;
+    private static int COLOR_TIP = 0xFFFFE14D;
     /** 中圈 + 内圈节点方块：lucidity 的 ender_dragon_waypoint_color（255, 0, 118）。 */
-    private static final int COLOR_NODE_INNER = 0xFFFF0076;
+    private static int COLOR_NODE_INNER = 0xFFFF0076;
     /** 外圈节点方块：lucidity 对该色取反（0, 255, 137）。 */
-    private static final int COLOR_NODE_OUTER = 0xFF00FF89;
+    private static int COLOR_NODE_OUTER = 0xFF00FF89;
     /** 节点方块的描边 / 填充 alpha（lucidity 的原色 alpha 就是 240）。 */
     private static final int MARKER_STROKE_ALPHA = 0xF0;
     private static final int MARKER_FILL_ALPHA = 0x40;
@@ -118,7 +122,7 @@ public final class EnderDragonPathVisualizer {
     /** 客户端入口调用一次：注册按键、tick 采样与渲染回调。 */
     public static void init() {
         ClientTickEvents.END_CLIENT_TICK.register(EnderDragonPathVisualizer::clientTick);
-        SogRenderEvents.register(EnderDragonPathVisualizer::renderGizmos);
+        WorldRenderEvents.BEFORE_DEBUG_RENDER.register(EnderDragonPathVisualizer::renderGizmos);
     }
 
     private static void clientTick(Minecraft client) {
@@ -240,10 +244,19 @@ public final class EnderDragonPathVisualizer {
     }
 
 
-    private static void renderGizmos(SogWorldRenderContext context) {
+    /** 从用户配置刷新本规则的配色；每帧渲染前调用一次，允许运行时改色。 */
+    private static void refreshColors() {
+        COLOR_TRAIL = VisualizerConfig.color("enderDragonPathVisualizer", "trail", 0xF0FF0076);
+        COLOR_TIP = VisualizerConfig.color("enderDragonPathVisualizer", "tip", 0xFFFFE14D);
+        COLOR_NODE_INNER = VisualizerConfig.color("enderDragonPathVisualizer", "nodeInner", 0xFFFF0076);
+        COLOR_NODE_OUTER = VisualizerConfig.color("enderDragonPathVisualizer", "nodeOuter", 0xFF00FF89);
+    }
+
+    private static void renderGizmos(WorldRenderContext context) {
         if (!VisualizerState.isActive(RULE)) {
             return;
         }
+        refreshColors();
         Snapshot current = snapshot;
         if (current.tips.isEmpty()) {
             return;

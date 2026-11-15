@@ -105,7 +105,8 @@ public final class VerticalDistanceSlider extends AbstractWidget {
             return false;
         }
         // 只认左键；右键不再代表“跟随玩家”，直接不处理。
-        if (event.button() != 0) {
+        // 26.3 的鼠标键编号是 SDL 的 1 起编号（左键 = 1），见 SogMouseButtons。
+        if (!SogMouseButtons.isLeft(event)) {
             return false;
         }
         applyValue(yToValue(event.y()));
@@ -114,7 +115,7 @@ public final class VerticalDistanceSlider extends AbstractWidget {
 
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
-        if (event.button() != 0 || !this.active || !this.visible) {
+        if (!SogMouseButtons.isLeft(event) || !this.active || !this.visible) {
             return false;
         }
         applyValue(yToValue(event.y()));

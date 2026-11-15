@@ -4,7 +4,6 @@ import cn.blockforge.generated.sogcarpet.SogSettings;
 import java.util.function.Consumer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.LivingEntity;
 import net.minecraft.world.item.Item;
@@ -33,15 +32,6 @@ public abstract class ShearsDurabilityMixin {
             + "Lnet/minecraft/world/entity/EquipmentSlot;)V", at = @At("HEAD"), cancellable = true)
     private void sogcarpet$shearsNoDurabilitySlot(
             int amount, LivingEntity entity, EquipmentSlot slot, CallbackInfo ci) {
-        if (SogSettings.shearsNoDurability && ((ItemStack) (Object) this).is(Items.SHEARS)) {
-            ci.cancel();
-        }
-    }
-
-    @Inject(method = "hurtAndBreak(ILnet/minecraft/world/entity/LivingEntity;"
-            + "Lnet/minecraft/world/InteractionHand;)V", at = @At("HEAD"), cancellable = true)
-    private void sogcarpet$shearsNoDurabilityHand(
-            int amount, LivingEntity entity, InteractionHand hand, CallbackInfo ci) {
         if (SogSettings.shearsNoDurability && ((ItemStack) (Object) this).is(Items.SHEARS)) {
             ci.cancel();
         }

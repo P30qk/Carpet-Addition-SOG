@@ -2,8 +2,12 @@
   "type": "minecraft:crafting_shaped",
   "category": "building",
   "key": {
-    "D": "minecraft:black_dye",
-    "G": "minecraft:glass"
+    "D": {
+      "item": "minecraft:black_dye"
+    },
+    "G": {
+      "item": "minecraft:glass"
+    }
   },
   "pattern": [
     " D ",

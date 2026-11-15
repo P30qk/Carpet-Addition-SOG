@@ -19,7 +19,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * <ul>
  *   <li>{@code tryShriek} 开头把等级清 0（{@code warningLevel = 0}，方法内唯一的
  *       {@code iconst_0}），锁定规则开启时改回当前值，即“不重置”；</li>
- *   <li>{@code lambda$tryToWarn$0}：尖啸成功后把玩家警告等级同步进方块实体，
+ *   <li>警告等级同步的 lambda（26.x 名 {@code lambda$tryToWarn$0}，1.21.11 名
+ *       {@code method_44016}）：尖啸成功后把玩家警告等级同步进方块实体，
  *       锁定规则取消这次写入（不升级），可调规则（1-4）把等级直接置为该值。</li>
  * </ul>
  *
@@ -39,6 +40,7 @@ public abstract class SculkShriekerMixin {
         return resetValue;
     }
 
+    // 1.21.11 里这段 lambda 还是混淆名 method_44016（官方映射没有给它改名）。
     @Inject(method = "method_44016", at = @At("HEAD"), cancellable = true)
     private void sog$overrideLevel(int trackerLevel, CallbackInfo ci) {
         if (SogSettings.sculkShriekerLevelLocked) {

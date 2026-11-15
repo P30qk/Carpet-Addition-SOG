@@ -3,6 +3,7 @@ package cn.blockforge.generated.sogcarpet.net;
 import cn.blockforge.generated.sogcarpet.SogSpawnTrace;
 import java.util.ArrayList;
 import java.util.List;
+import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
@@ -28,6 +29,8 @@ public record SpawnTracePayload(String dimension, List<SogSpawnTrace.SpawnEvent>
 
     /** 单个包最多携带多少条出生事件。 */
     public static final int MAX_EVENTS = 256;
+    /** 单条出生事件最多携带多少个候选路径点。 */
+    public static final int MAX_ATTEMPTS_PER_EVENT = 64;
     /**
      * 出生事件的下发半径（格）：服务端只把落在这个范围内的出生事件发给该玩家。
      * 刷怪本来只发生在玩家附近（原版刷怪距离 24~128 格），这个半径既保证看得到身边
@@ -54,6 +57,18 @@ public record SpawnTracePayload(String dimension, List<SogSpawnTrace.SpawnEvent>
             SogSpawnTrace.SpawnEvent event = events.get(i);
             buf.writeVarInt(event.entityId());
             buf.writeBlockPos(event.spawnPos());
+            // 候选路径：锚点 + 依次考察过的候选位置（移植自 lucidity 的刷怪游走）。
+            boolean hasInitial = event.initial() != null;
+            buf.writeBoolean(hasInitial);
+            if (hasInitial) {
+                buf.writeBlockPos(event.initial());
+            }
+            List<BlockPos> attempts = event.attempts() == null ? List.of() : event.attempts();
+            int attemptCount = Math.min(attempts.size(), MAX_ATTEMPTS_PER_EVENT);
+            buf.writeVarInt(attemptCount);
+            for (int a = 0; a < attemptCount; a++) {
+                buf.writeBlockPos(attempts.get(a));
+            }
         }
     }
 
@@ -69,7 +84,17 @@ public record SpawnTracePayload(String dimension, List<SogSpawnTrace.SpawnEvent>
         List<SogSpawnTrace.SpawnEvent> events = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             int entityId = buf.readVarInt();
-            events.add(new SogSpawnTrace.SpawnEvent(dimensionKey, entityId, buf.readBlockPos()));
+            BlockPos spawnPos = buf.readBlockPos();
+            BlockPos initial = buf.readBoolean() ? buf.readBlockPos() : null;
+            int attemptCount = buf.readVarInt();
+            if (attemptCount < 0 || attemptCount > MAX_ATTEMPTS_PER_EVENT) {
+                throw new IllegalStateException("spawn trace payload: bad attempt count " + attemptCount);
+            }
+            List<BlockPos> attempts = new ArrayList<>(attemptCount);
+            for (int a = 0; a < attemptCount; a++) {
+                attempts.add(buf.readBlockPos());
+            }
+            events.add(new SogSpawnTrace.SpawnEvent(dimensionKey, entityId, spawnPos, initial, attempts));
         }
         return new SpawnTracePayload(dimension, events);
     }

@@ -7,7 +7,12 @@
     "defaultRequire": 1
   },
   "client": [
+    "KeyboardHandlerMixin",
     "AbstractContainerScreenMixin",
-    "PistonHeadRendererMixin"
+    "BeaconScreenMixin",
+    "EntityAddDeltaMovementMixin",
+    "PistonHeadRendererMixin",
+    "PlayerTabOverlayMixin",
+    "GuiTabListAccessor"
   ]
 }

@@ -3,9 +3,13 @@ package cn.blockforge.generated.sogcarpet.client;
 import cn.blockforge.generated.sogcarpet.SogSettings;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import cn.blockforge.generated.sogcarpet.client.render.WorldRenderContext;
+import cn.blockforge.generated.sogcarpet.client.render.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import cn.blockforge.generated.sogcarpet.client.gizmo.GizmoStyle;
+import cn.blockforge.generated.sogcarpet.client.gizmo.Gizmos;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -92,7 +96,7 @@ public final class FlexiblePlacementCorners {
 
     /** 客户端入口调用一次：注册覆盖层重画回调。 */
     public static void init() {
-        SogRenderEvents.register(FlexiblePlacementCorners::render);
+        WorldRenderEvents.BEFORE_DEBUG_RENDER.register(FlexiblePlacementCorners::render);
     }
 
     // ------------------------------------------------------------------ 规则开关
@@ -233,7 +237,7 @@ public final class FlexiblePlacementCorners {
         return enabled() && drewLastFrame && overlayVisible(client);
     }
 
-    private static void render(SogWorldRenderContext context) {
+    private static void render(WorldRenderContext context) {
         drewLastFrame = false;
         if (!enabled()) {
             return;
@@ -249,7 +253,7 @@ public final class FlexiblePlacementCorners {
     }
 
     /** 真正画覆盖层；返回 true 表示这一帧画成了（可以放心拦掉 Tweakeroo 的绘制）。 */
-    private static boolean drawOverlay(SogWorldRenderContext context) {
+    private static boolean drawOverlay(WorldRenderContext context) {
         Minecraft client = Minecraft.getInstance();
         if (!overlayVisible(client) || client.player == null
                 || !(client.hitResult instanceof BlockHitResult hit)

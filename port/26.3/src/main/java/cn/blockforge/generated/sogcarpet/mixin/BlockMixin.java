@@ -10,7 +10,6 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.item.enchantment.Enchantment;
 import net.minecraft.world.item.enchantment.Enchantments;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
@@ -30,6 +29,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(Block.class)
 public abstract class BlockMixin {
+    // 26.3 的 Block#playerDestroy 参数从 (Level, Player) 收紧成 (ServerLevel, ServerPlayer)。
     @Inject(method = "playerDestroy", at = @At("HEAD"))
     private void sogcarpet$silkTouchBonusDrops(ServerLevel level, ServerPlayer player, BlockPos pos,
             BlockState state, BlockEntity blockEntity, ItemStack tool, CallbackInfo ci) {

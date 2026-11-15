@@ -57,7 +57,15 @@ public final class SogVisualizerCommand {
                         .then(Commands.literal("reset")
                                 .executes(ctx -> reset(ctx, self(ctx)))
                                 .then(Commands.argument("player", EntityArgument.player())
-                                        .executes(ctx -> reset(ctx, EntityArgument.getPlayer(ctx, "player")))))));
+                                        .executes(ctx -> reset(ctx, EntityArgument.getPlayer(ctx, "player")))))
+                        .then(Commands.literal("reset")
+                                .executes(ctx -> reset(ctx, self(ctx)))
+                                .then(Commands.argument("player", EntityArgument.player())
+                                        .executes(ctx -> reset(ctx, EntityArgument.getPlayer(ctx, "player"))))))
+                // 信标效果黑白名单（Op）：/sogcarpet beaconfilter ...
+                .then(SogBeaconCommand.build())
+                // 随身信标（给纯原版客户端 / 服务端测试用）：/sogcarpet portablebeacon <效果> [第二个]
+                .then(SogBeaconCommand.portable()));
     }
 
     private static ServerPlayer self(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {

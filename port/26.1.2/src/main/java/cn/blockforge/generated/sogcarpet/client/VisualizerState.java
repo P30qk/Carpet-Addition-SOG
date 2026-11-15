@@ -1,7 +1,12 @@
 package cn.blockforge.generated.sogcarpet.client;
 
 import cn.blockforge.generated.sogcarpet.SogSettings;
+import cn.blockforge.generated.sogcarpet.net.AggroWantPayload;
+import cn.blockforge.generated.sogcarpet.net.HealthChangeWantPayload;
+import cn.blockforge.generated.sogcarpet.net.MotionWantPayload;
+import cn.blockforge.generated.sogcarpet.net.SpawnStatsConfigPayload;
 import cn.blockforge.generated.sogcarpet.net.SpawnTraceWantPayload;
+import cn.blockforge.generated.sogcarpet.net.VillagerBindingWantPayload;
 import cn.blockforge.generated.sogcarpet.net.VisualizerPrefsSetPayload;
 import com.mojang.blaze3d.platform.InputConstants;
 import java.io.IOException;
@@ -65,6 +70,9 @@ public final class VisualizerState {
     private static boolean loaded;
     /** 服务端是否也装了本模组：收到过规则同步即为真，断线时清掉。 */
     private static volatile boolean serverHasSogRules;
+    /** 服务端是否允许本玩家改规则（OP），以及哪些可视化规则已经是“永久开启”。 */
+    private static volatile boolean ruleControlAvailable;
+    private static final java.util.Set<String> PERSISTED_RULES = ConcurrentHashMap.newKeySet();
 
     private static KeyMapping toggleKey;
     private static KeyMapping menuKey;
@@ -87,8 +95,8 @@ public final class VisualizerState {
      * 否则会被原版按键抢先：
      * <ul>
      *   <li>V 本身没有原版绑定，这里只需在 START 里开界面；</li>
-     *   <li>O 在 26.2 里是原版<b>好友界面</b>的默认键，Ctrl+O 会连带把好友界面也打开，
-     *       所以这里在切换总开关的同时把那次 {@code keyFriends} 点击一并吃掉。</li>
+     *   <li>26.1.2 里 O 没有原版绑定（好友界面是 26.2 才有的），按 O 只切总开关；
+     *       这里顺手把社交界面键的残余点击吃掉，避免以后版本换键位时冲突。</li>
      * </ul>
      */
     private static void clientTickStart(Minecraft client) {
@@ -105,11 +113,16 @@ public final class VisualizerState {
                 // 单独按 O 是原版好友界面，不归我们管。
                 continue;
             }
+            // 吃掉同一帧里可能残留的社交界面键点击（26.1.2 的 O 本身没有绑定）。
+            while (client.options.keySocialInteractions.consumeClick()) {
+                // 只要这一次点击不会落到原版处理里就行。
+            }
             if (client.screen != null) {
                 continue;
             }
             masterEnabled = !masterEnabled;
             save();
+            // 26.1.2 还没有 26.2 里那层 Gui#hud，overlayMessage 直接在 Gui 上。
             if (client.gui != null) {
                 client.gui.setOverlayMessage(Component.translatable(masterEnabled
                         ? "sog_carpet.ui.visualizer.master_on"
@@ -128,6 +141,19 @@ public final class VisualizerState {
     /** 总开关。 */
     public static boolean masterEnabled() {
         return masterEnabled;
+    }
+
+    /**
+     * 世界是否被 <b>/tick freeze（或 /tick step）</b> 冻住了。冻结时可视化不再按 tick 淡出/移动，
+     * 就把画面停在那一刻，方便用 tick 指令逐帧查看。
+     */
+    public static boolean tickFrozen(net.minecraft.client.Minecraft client) {
+        return client != null && client.level != null && client.level.tickRateManager().isFrozen();
+    }
+
+    /** 当前连接的服务端是否也装了本模组（收到过规则同步）。纯客户端时为 false。 */
+    public static boolean serverHasSogRules() {
+        return serverHasSogRules;
     }
 
     /** 这条规则当前是否真的画出来：总开关 &amp;&amp; 规则开 &amp;&amp; 渲染开关。 */
@@ -190,7 +216,38 @@ public final class VisualizerState {
         if (!serverHasSogRules || client.getConnection() == null) {
             return;
         }
-        ClientPlayNetworking.send(new SpawnTraceWantPayload(isActive("mobSpawnVisualizer")));
+        ClientPlayNetworking.send(new SpawnTraceWantPayload(
+                isActive("mobSpawnVisualizer") || isActive("spawnStatsVisualizer")));
+        // 同理：服务端只在玩家明确要收时才每几 tick 扫生物、发仇恨快照。
+        ClientPlayNetworking.send(new AggroWantPayload(isActive("aggroVisualizer")));
+        // 速度/动量可视化的“外力冲量”：玩家关掉后服务端就别再扫、别再发。
+        // 投掷物轨迹可视化的预览要用同一份冲量（悬停远传珍珠的待施加速度 → 落点），
+        // 所以只要两条里还有一条开着，就继续要。
+        ClientPlayNetworking.send(new MotionWantPayload(
+                isActive("motionVisualizer") || isActive("projectileTrajectoryVisualizer")));
+        // 村民功能方块绑定：玩家关掉后服务端就别再扫村民、别再发绑定快照。
+        ClientPlayNetworking.send(new VillagerBindingWantPayload(
+                isActive("villagerBindingVisualizer")));
+        // 生命数值变化：玩家关掉后服务端就别再采集伤害/治疗、别再发。
+        ClientPlayNetworking.send(new HealthChangeWantPayload(isActive("healthChangeVisualizer")));
+        // 怪物生成可视化：把统计面板配置（整体 + 每个分类开关）一并上报。
+        pushSpawnStatsConfig();
+    }
+
+    /** 把“怪物生成可视化”统计面板的配置发给服务端（面板由服务端写进 Tab 列表页脚）。 */
+    public static void pushSpawnStatsConfig() {
+        Minecraft client = Minecraft.getInstance();
+        if (!serverHasSogRules || client.getConnection() == null) {
+            return;
+        }
+        StringBuilder sb = new StringBuilder(128);
+        for (VisualizerConfig.Option option : VisualizerConfig.options("spawnStatsVisualizer")) {
+            sb.append(option.key()).append('=')
+                    .append(VisualizerConfig.option("spawnStatsVisualizer", option.key(),
+                            option.defaultValue()) ? '1' : '0')
+                    .append(';');
+        }
+        ClientPlayNetworking.send(new SpawnStatsConfigPayload(sb.toString()));
     }
 
     /**
@@ -218,9 +275,46 @@ public final class VisualizerState {
         return sb.toString();
     }
 
-    /** 是否有独立配置界面（世吞小助手有）。 */
+    /** 每条可视化都有独立配置界面（颜色，部分规则另有选项）。 */
     public static boolean hasConfigScreen(String rule) {
-        return "worldEaterHelper".equals(rule);
+        return SogSettings.VISUALIZER_RULES.contains(rule);
+    }
+
+    /** 这条规则对应的独立配置界面（无上级，关闭后回到游戏）。 */
+    public static net.minecraft.client.gui.screens.Screen configScreen(String rule) {
+        return configScreen(rule, null);
+    }
+
+    /** 这条规则对应的独立配置界面；parent 非空时 Done/Esc 返回该上级面板。 */
+    public static net.minecraft.client.gui.screens.Screen configScreen(String rule,
+            net.minecraft.client.gui.screens.Screen parent) {
+        if ("worldEaterHelper".equals(rule)) {
+            return new WorldEaterConfigScreen(parent);
+        }
+        if ("motionVisualizer".equals(rule)) {
+            return new MotionVisualizerConfigScreen(parent);
+        }
+        if ("explosionVisualizer".equals(rule)) {
+            return new ExplosionVisualizerConfigScreen(parent);
+        }
+        if ("aggroRangeVisualizer".equals(rule)) {
+            return new AggroRangeConfigScreen(parent);
+        }
+        if ("itemFlowTracker".equals(rule)) {
+            return new ItemFlowConfigScreen(parent);
+        }
+        return new VisualizerConfigScreen(rule, parent);
+    }
+
+    /** 打开某条可视化的颜色/选项配置界面（无上级）。 */
+    public static void openColorScreen(String rule) {
+        openColorScreen(rule, null);
+    }
+
+    /** 打开颜色/选项配置界面；关闭后返回 parent（通常是打开它的子面板）。 */
+    public static void openColorScreen(String rule, net.minecraft.client.gui.screens.Screen parent) {
+        Minecraft client = Minecraft.getInstance();
+        client.setScreenAndShow(new VisualizerConfigScreen(rule, parent));
     }
 
     /** 规则在按钮上显示用的短名字。 */
@@ -240,6 +334,83 @@ public final class VisualizerState {
         SERVER_PREFS.clear();
         serverPrefsConfigured = false;
         serverHasSogRules = false;
+        ruleControlAvailable = false;
+        PERSISTED_RULES.clear();
+    }
+
+    // ------------------------------------------------------------------ 面板直接开关规则
+
+    /**
+     * 服务端下发的「能不能改规则 + 哪些是永久开启」。
+     *
+     * <p>解析 {@code op=1;perm:<规则>=1;} 形式的串。没有 OP 的玩家面板保持只读，避免他们点了
+     * 却什么都没发生；真正能不能改最终还是由服务端再校验一次权限。</p>
+     */
+    public static void applyRuleStateData(String data) {
+        PERSISTED_RULES.clear();
+        boolean op = false;
+        if (data != null) {
+            for (String part : data.split(";")) {
+                int eq = part.indexOf('=');
+                if (eq <= 0) {
+                    continue;
+                }
+                String key = part.substring(0, eq).trim();
+                boolean value = "1".equals(part.substring(eq + 1).trim());
+                if ("op".equals(key)) {
+                    op = value;
+                } else if (key.startsWith("perm:") && value) {
+                    PERSISTED_RULES.add(key.substring("perm:".length()));
+                }
+            }
+        }
+        ruleControlAvailable = op;
+        refreshOpenScreen();
+    }
+
+    /** 面板要不要把规则状态做成可点的三态按钮（对面装了本模组 + 自己是 OP）。 */
+    public static boolean canControlRules() {
+        return serverHasSogRules && ruleControlAvailable;
+    }
+
+    /** 这条规则是不是「永久开启」（carpet.conf 里有它的 true）。 */
+    public static boolean isPermanentlyEnabled(String rule) {
+        return PERSISTED_RULES.contains(rule);
+    }
+
+    /**
+     * 点一下按钮：按 关闭 → 暂时开启 → 永久开启 → 关闭 的顺序循环。
+     *
+     * <p>顺序是“先开、再永久、再关”：第一次点就能看到画面变化，第二次再落盘，第三次彻底关掉。</p>
+     */
+    public static void cycleRuleMode(String rule) {
+        int mode;
+        if (isPermanentlyEnabled(rule)) {
+            mode = cn.blockforge.generated.sogcarpet.net.RuleSetPayload.MODE_OFF;
+        } else if (isRuleEnabled(rule)) {
+            mode = cn.blockforge.generated.sogcarpet.net.RuleSetPayload.MODE_PERMANENT_ON;
+        } else {
+            mode = cn.blockforge.generated.sogcarpet.net.RuleSetPayload.MODE_TEMPORARY_ON;
+        }
+        Minecraft client = Minecraft.getInstance();
+        if (!serverHasSogRules || client.getConnection() == null) {
+            return;
+        }
+        ClientPlayNetworking.send(
+                new cn.blockforge.generated.sogcarpet.net.RuleSetPayload(rule, mode));
+    }
+
+    /** 三态按钮上显示的文字。 */
+    public static Component ruleModeName(String rule) {
+        String suffix;
+        if (isPermanentlyEnabled(rule)) {
+            suffix = "permanent";
+        } else if (isRuleEnabled(rule)) {
+            suffix = "temporary";
+        } else {
+            suffix = "off";
+        }
+        return Component.translatable("sog_carpet.ui.visualizer.rule_mode." + suffix);
     }
 
     /** 解析服务端发来的 {@code 规则名=0/1;} 串并写入同步表。 */

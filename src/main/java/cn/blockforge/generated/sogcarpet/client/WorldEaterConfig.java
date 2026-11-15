@@ -98,6 +98,27 @@ public final class WorldEaterConfig {
      * 只标“露头”方块会导致机器一过、标记全消失。关掉后退回旧的“只标露天方块”。
      */
     private static boolean markHidden = true;
+    /**
+     * 高度限制开关（默认开）：幽灵方块被抬高太多时干脆不画。
+     *
+     * <p>正常情况下幽灵就在本体上方 {@code EXTRUDE_HEIGHT}（7）格；但本体被实心方块埋住时，
+     * 幽灵会沿这一列往上抬去找空位，可能被抬到十几格甚至更高，反而让人分不清它到底对应哪一块。
+     * 打开这个开关后，幽灵与本体竖直距离 ≥ {@link #maxGhostLift} 格的方块不渲染。</p>
+     */
+    private static boolean heightLimit = true;
+    /**
+     * 是否在<b>映射方块（幽灵）</b>头顶显示它与<b>真方块</b>之间的距离格数。默认关闭。
+     *
+     * <p>幽灵会画在本体上方 {@code EXTRUDE_HEIGHT} 格，本体被埋住时还会更高，光看俯视图很难
+     * 判断“这块到底对应下面哪一格、差多远”。打开后在幽灵方块顶面画一行“7.0 格”，
+     * 数值就是幽灵中心到真方块中心的直线距离。</p>
+     */
+    private static boolean showDistance = false;
+    /** 高度限制的阈值（格）：幽灵与本体竖直距离达到这个值就不渲染。默认 8。 */
+    private static int maxGhostLift = 8;
+    /** 阈值允许的范围：太小会把正常的 7 格抬升也挡掉，太大等于没限制。 */
+    public static final int MIN_MAX_GHOST_LIFT = 1;
+    public static final int MAX_MAX_GHOST_LIFT = 64;
     private static boolean loaded;
 
     private WorldEaterConfig() {
@@ -180,6 +201,16 @@ public final class WorldEaterConfig {
                     // 老配置文件没有这一行：保持默认的“显示被遮挡方块”。
                     markHidden = Boolean.parseBoolean(
                             line.substring("markHidden=".length()).trim());
+                } else if (line.startsWith("showDistance=")) {
+                    // 老配置文件没有这一行：保持默认关闭。
+                    showDistance = Boolean.parseBoolean(
+                            line.substring("showDistance=".length()).trim());
+                } else if (line.startsWith("heightLimit=")) {
+                    // 老配置文件没有这一行：保持默认的“启用高度限制”。
+                    heightLimit = Boolean.parseBoolean(
+                            line.substring("heightLimit=".length()).trim());
+                } else if (line.startsWith("maxGhostLift=")) {
+                    maxGhostLift = clampLift(parseInt(line.substring("maxGhostLift=".length()), 8));
                 } else if (line.startsWith("entry=")) {
                     parseEntry(line.substring("entry=".length()));
                 }
@@ -443,6 +474,9 @@ public final class WorldEaterConfig {
         sb.append("seedVersion=").append(SEED_VERSION).append('\n');
         sb.append("autoWaterlogged=").append(autoWaterlogged).append('\n');
         sb.append("markHidden=").append(markHidden).append('\n');
+        sb.append("showDistance=").append(showDistance).append('\n');
+        sb.append("heightLimit=").append(heightLimit).append('\n');
+        sb.append("maxGhostLift=").append(maxGhostLift).append('\n');
         List<Entry> sorted = sortedEntries();
         for (Entry entry : sorted) {
             sb.append("entry=").append(entry.idString())
@@ -486,6 +520,72 @@ public final class WorldEaterConfig {
     public static synchronized boolean isMarkHidden() {
         ensureLoaded();
         return markHidden;
+    }
+
+    /** 是否在映射方块头顶显示它与真方块的距离（默认关）。 */
+    public static synchronized boolean isDistanceShown() {
+        ensureLoaded();
+        return showDistance;
+    }
+
+    /** 切换“显示映射距离”。 */
+    public static synchronized void setDistanceShown(boolean value) {
+        ensureLoaded();
+        showDistance = value;
+        save();
+    }
+
+    /** 是否启用“抬得太高就不画”的高度限制（默认开）。 */
+    public static synchronized boolean isHeightLimit() {
+        ensureLoaded();
+        return heightLimit;
+    }
+
+    /** 高度限制阈值：幽灵与本体竖直距离达到它就不渲染（默认 8）。 */
+    public static synchronized int maxGhostLift() {
+        ensureLoaded();
+        return maxGhostLift;
+    }
+
+    public static synchronized void setHeightLimit(boolean value) {
+        ensureLoaded();
+        heightLimit = value;
+        save();
+    }
+
+    /** 直接设阈值（会夹到允许范围）。 */
+    public static synchronized void setMaxGhostLift(int value) {
+        ensureLoaded();
+        maxGhostLift = clampLift(value);
+        save();
+    }
+
+    /** 从界面的输入框里解析一个阈值；解析不出来时返回 -1，调用方保持原值。 */
+    public static int parseGhostLift(String text) {
+        if (text == null || text.isBlank()) {
+            return -1;
+        }
+        try {
+            return clampLift(Integer.parseInt(text.trim()));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static int clampLift(int value) {
+        return Math.max(MIN_MAX_GHOST_LIFT, Math.min(MAX_MAX_GHOST_LIFT, value));
+    }
+
+    /**
+     * 一个幽灵方块要不要因为“抬得太高”被跳过。
+     *
+     * <p>开关关着时永远返回 false（全部照旧渲染）；开关开着时，竖直距离达到阈值就不画。</p>
+     */
+    public static boolean isTooHigh(int realY, int ghostY) {
+        if (!isHeightLimit()) {
+            return false;
+        }
+        return ghostY - realY >= maxGhostLift();
     }
 
     /** 方块本体要不要标注（不含“仅含水”的情况）。 */
@@ -647,6 +747,7 @@ public final class WorldEaterConfig {
         ENTRIES.clear();
         autoWaterlogged = true;
         markHidden = true;
+        showDistance = false;
         seedDefaults();
         save();
     }

@@ -8,6 +8,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import cn.blockforge.generated.sogcarpet.client.gizmo.GizmoStyle;
+import cn.blockforge.generated.sogcarpet.client.gizmo.Gizmos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.boss.enderdragon.EnderDragon;
@@ -39,9 +41,9 @@ public final class EnderDragonBreakRangeVisualizer {
     private static final int WALL_BREAK_PARTS = 3;
 
     /** lucidity 默认色 ender_dragon_destruction_color：(137, 101, 255)，alpha 100。 */
-    private static final int COLOR_PART_FILL = 0x648965FF;
+    private static int COLOR_PART_FILL = 0x648965FF;
     /** 部位体积的描边（同色，几乎不透明），保证从任何角度都能看清盒子边界。 */
-    private static final int COLOR_PART_STROKE = 0xE68965FF;
+    private static int COLOR_PART_STROKE = 0xE68965FF;
     private static final float PART_STROKE_WIDTH = 2.5F;
     /** 头 / 脖子 / 身体三块体积互相重叠，面重合会 z-fighting 闪烁：逐块错开一点点。 */
     private static final double PART_INFLATE = 0.003D;
@@ -102,10 +104,17 @@ public final class EnderDragonBreakRangeVisualizer {
                 Mth.floor(box.maxX) + 1.0D, Mth.floor(box.maxY) + 1.0D, Mth.floor(box.maxZ) + 1.0D);
     }
 
+    /** 从用户配置刷新本规则的配色；每帧渲染前调用一次，允许运行时改色。 */
+    private static void refreshColors() {
+        COLOR_PART_FILL = VisualizerConfig.color("enderDragonBreakRangeVisualizer", "partFill", 0x648965FF);
+        COLOR_PART_STROKE = VisualizerConfig.color("enderDragonBreakRangeVisualizer", "partStroke", 0xE68965FF);
+    }
+
     private static void renderGizmos(WorldRenderContext context) {
         if (!VisualizerState.isActive(RULE)) {
             return;
         }
+        refreshColors();
         Snapshot current = snapshot;
         if (current.boxes.isEmpty()) {
             return;

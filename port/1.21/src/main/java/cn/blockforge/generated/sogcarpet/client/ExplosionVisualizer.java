@@ -11,12 +11,26 @@ import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import cn.blockforge.generated.sogcarpet.client.gizmo.GizmoStyle;
+import cn.blockforge.generated.sogcarpet.client.gizmo.Gizmos;
+import cn.blockforge.generated.sogcarpet.client.gizmo.TextGizmo;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.boss.enderdragon.EndCrystal;
+import net.minecraft.world.entity.boss.wither.WitherBoss;
 import net.minecraft.world.entity.item.PrimedTnt;
 import net.minecraft.world.entity.monster.Creeper;
+import net.minecraft.world.entity.projectile.LargeFireball;
+import net.minecraft.world.entity.projectile.WitherSkull;
+import net.minecraft.world.entity.projectile.windcharge.BreezeWindCharge;
+import net.minecraft.world.entity.projectile.windcharge.WindCharge;
+import net.minecraft.world.entity.vehicle.MinecartTNT;
 import net.minecraft.world.level.ClipContext;
+import net.minecraft.world.level.block.BedBlock;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.RespawnAnchorBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BedPart;
 import net.minecraft.world.level.material.FluidState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
@@ -26,37 +40,21 @@ import net.minecraft.world.phys.Vec3;
 /**
  * “爆炸可视化”规则的客户端实现（移植自 lucidity 的 explosion visualizer）。
  *
- * <p>只要玩家附近存在<b>已点燃的 TNT</b>（{@link PrimedTnt}）或<b>正在膨胀、马上要炸的苦力怕</b>
- * （{@link Creeper#getSwellDir()} 大于 0），就按 lucidity 的算法把这次爆炸整体预览出来：</p>
+ * <p>只要玩家附近存在爆炸源，就按原版爆炸射线模型把这次爆炸整体预览出来。爆炸源与 lucidity
+ * 一致：已点燃的 {@link PrimedTnt}、正在膨胀的 {@link Creeper}、水晶 {@link EndCrystal}、
+ * 已点火的 {@link MinecartTNT}、飞行的 {@link WitherSkull}，以及处于无敌阶段的 {@link WitherBoss}。</p>
+ *
+ * <p>各部分都可以在 {@link ExplosionVisualizerConfigScreen}（Ctrl+V → 本规则的“配置”）里
+ * 单独开关，选项与 lucidity 的 ExplosionVisualizerConfigs 对齐，并额外提供“渲染圆球”开关：</p>
  * <ul>
- *   <li><b>橙色半透明方块</b>：会被这次爆炸破坏的方块，颜色取 lucidity 默认的
- *       {@code explosion_destruction_color}(255,122,30)，透明度按“方块离爆心有多近”的概率
- *       从 30% 到 100% 渐变——越靠中心越实；</li>
- *   <li><b>蓝色小光点</b>：从爆心射出的爆炸射线上每一步的采样点（线判定），颜色取爆心色的反色
- *       （lucidity 里的蓝三角就是这么来的），越靠近爆心越亮；</li>
- *   <li><b>黄绿色光点</b>：爆炸中心；</li>
- *   <li><b>绿色／红色光点</b>：会被波及的实体身上的爆炸伤害采样点——被方块挡住的是安全点（绿），
- *       能直通爆心的暴露点（红）；</li>
- *   <li><b>淡绿色半透明圆球</b>：在爆炸范围最外围罩一圈，以爆炸中心为球心。</li>
+ *   <li><b>方块破坏</b>：会被这次爆炸破坏的方块，橙色半透明，越靠中心越实；</li>
+ *   <li><b>方块射线投射</b>：爆炸射线上每一步的采样点（爆心色反色，蓝）；</li>
+ *   <li><b>爆炸中心</b>：黄绿色光点；</li>
+ *   <li><b>实体采样点</b>：被波及实体身上的伤害采样点，被挡住的是安全点（绿），直通的是暴露点（红）；</li>
+ *   <li><b>采样点射线投射</b>：从采样点到命中点/爆心的连线；</li>
+ *   <li><b>爆炸计时器</b>：在爆炸源头顶显示引信倒计时（秒）；</li>
+ *   <li><b>渲染圆球</b>：最外围的浅绿色半透明范围球（本模组新增）。</li>
  * </ul>
- *
- * <p>光点用原版 {@code Gizmos.point} 画，它的尺寸是<b>屏幕像素</b>而非世界坐标
- * （{@code debug_point.vsh} 里直接写 {@code gl_PointSize = LineWidth}）。所以尺寸常量
- * 取 2.5 / 4 / 9 这种像素量级；填 0.06 之类的“世界尺寸”会变成亚像素、什么都看不见。</p>
- *
- * <p>破坏判定完全照搬原版爆炸：把 16×16×16 立方体表面上的 1352 个方向当作射线，从爆心出发，
- * 每步前进 0.3 格、能量衰减 0.225，命中方块再按 {@code (爆炸抗性 + 0.3) * 0.3} 额外衰减，
- * 能量耗尽就停。每根射线的初始能量用 {@code 半径 * 1.3}（原版是 0.7~1.3 随机，这里取上界），
- * 于是每个方块会算出一个“被破坏概率”，预览稳定不闪。</p>
- *
- * <p>光点云按“所有射线共享预算、各自等步长抽稀”来采样，铺满整个球壳；若按“装够就停”
- * 截断，点会全堆在最先遍历到的几条射线上，整团光点偏到一侧。</p>
- *
- * <p>所有几何都用<b>方块/实体的真实坐标</b>：方块用 {@code new AABB(BlockPos)}（正好是
- * 那一格，只额外外扩 0.002 格避开共面闪烁），爆心、采样点直接用各自的 {@link Vec3}。
- * TNT 的爆心按原版 {@code Explosion} 的取法固定在 {@code getY() + 0.0625}（1/16 格），
- * <b>不再乘引信 tick</b>：之前用 {@code getFuse() * 0.0625}，引信从 80 倒数到 0 时爆心会
- * 从方块上方 5 格一路掉回原地，整幅预览跟着往下滑，这才是“渲染位置偏移下降”。</p>
  *
  * <p>爆炸是短时事件，所以每 {@value #SCAN_INTERVAL_TICKS} tick 重算一次快照，渲染只读快照；
  * 只预览玩家 {@value #SEARCH_RANGE} 格以内的爆炸，避免 TNT 阵列拖垮客户端。</p>
@@ -67,110 +65,109 @@ public final class ExplosionVisualizer {
 
     /** 只预览玩家周围这个距离（格）以内的爆炸。 */
     private static final double SEARCH_RANGE = 16.0D;
-    /**
-     * 扫描间隔。取 1（每 tick 重算一遍）而不是 3：爆炸源（尤其是还在下落的 TNT）本身
-     * 一直在动，隔几 tick 才算一次的话，整幅预览会明显落在 TNT 后面，看起来就是
-     * “偏离方向”。射线推演本身只有几万次循环，每 tick 一次完全不卡。
-     */
+    /** 扫描间隔（每 tick 一次，爆炸源自己也在动）。 */
     private static final int SCAN_INTERVAL_TICKS = 1;
-    /** 同屏最多同时预览多少个爆炸源。 */
-    private static final int MAX_SOURCES = 4;
+    /** 同屏最多同时预览多少个实体爆炸源。 */
+    private static final int MAX_SOURCES = 8;
     /** 单个爆炸最多标出多少块会被破坏的方块。 */
     private static final int MAX_BLOCKS = 2000;
-    /**
-     * 单个爆炸最多画多少个射线采样点。所有 1352 条射线<b>共享</b>这份预算：按“每条射线
-     * 每隔 stride 步取一个点”均匀抽稀，点云才会铺满整个球壳。
-     * <p>之前是“装满就停止添加”，而射线是按 i/j/k 顺序遍历的，前 4000 个点全挤在最先
-     * 遍历到的那一小撮方向里——光点云整个偏到一侧，这才是“偏离方向”的观感来源之一。</p>
-     */
+    /** 单个爆炸最多画多少个射线采样点（所有射线共享预算）。 */
     private static final int MAX_RAY_POINTS = 20000;
     /** 单个爆炸最多处理多少个被波及的实体。 */
     private static final int MAX_ENTITIES = 12;
     /** 单个实体最多取多少个伤害采样点。 */
     private static final int MAX_SAMPLES_PER_ENTITY = 256;
+    /** 方块爆炸源最多同时预览多少个。 */
+    private static final int MAX_BLOCK_SOURCES = 8;
 
-    /** TNT 爆炸威力（原版默认值）。 */
+    /** TNT 爆炸威力（原版默认值）与爆心抬高量。 */
     private static final float TNT_POWER = 4.0F;
-    /**
-     * 原版 TNT 引爆时爆心的固定抬高量：{@code PrimedTnt.explode()} 用的是
-     * {@code getY(0.0625)}，也就是实体原点往上 1/16 格，和引信剩余 tick 无关。
-     */
     private static final double TNT_CENTER_Y_OFFSET = 0.0625D;
-    /** 苦力怕爆炸威力。 */
+    /** 苦力怕爆炸威力、引信长度（tick）。 */
     private static final float CREEPER_POWER = 3.0F;
-    /** 闪电苦力怕爆炸威力。 */
     private static final float CHARGED_CREEPER_POWER = 6.0F;
+    private static final int CREEPER_FUSE_TICKS = 30;
+    /** 其他爆炸源威力。 */
+    private static final float CRYSTAL_POWER = 6.0F;
+    private static final float SKULL_POWER = 1.0F;
+    private static final float WITHER_POWER = 7.0F;
+    private static final float FIREBALL_POWER = 1.0F;
+    private static final float WIND_CHARGE_POWER = 1.2F;
+    private static final float BREEZE_WIND_CHARGE_POWER = 3.0F;
+    private static final float ANCHOR_POWER = 5.0F;
+    private static final float BED_POWER = 5.0F;
+    /** 方块爆炸源（重生锚、床）的扫描半径（格）与扫描间隔（tick）。 */
+    private static final int BLOCK_SCAN_RADIUS = 10;
+    private static final int BLOCK_SCAN_INTERVAL_TICKS = 2;
 
-    /** 爆炸射线每步前进的距离。 */
+    /** 爆炸射线每步前进的距离、每步衰减、初始能量系数。 */
     private static final float RAY_STEP = 0.3F;
-    /** 爆炸射线每步的自然衰减。 */
     private static final float RAY_DECAY = 0.225F;
-    /** 每根射线初始能量的下界比例（原版 0.7~1.3 随机，这里统一取 1.3 的上界做确定性预览）。 */
     private static final float POWER_MIN_FACTOR = 0.7F;
     private static final float POWER_MAX_FACTOR = 1.3F;
-    /** 爆炸边缘 = 威力 × 这个系数：射线初始能量 1.3×威力，每 0.3 格衰减 0.225。 */
     private static final float EDGE_FACTOR = POWER_MAX_FACTOR / RAY_DECAY * RAY_STEP;
-    /** 立方体射线的网格边长：只有表面上的方向会被采用，共 1352 条。 */
     private static final int RAY_GRID = 16;
 
     /** lucidity 的 explosion_destruction_color：橙，基础透明度 70/255。 */
-    private static final int DESTRUCTION_RED = 255;
-    private static final int DESTRUCTION_GREEN = 122;
-    private static final int DESTRUCTION_BLUE = 30;
+    private static int DESTRUCTION_RED = 255;
+    private static int DESTRUCTION_GREEN = 122;
+    private static int DESTRUCTION_BLUE = 30;
     private static final float DESTRUCTION_ALPHA = 130.0F / 255.0F;
-    /**
-     * 破坏方块的最低透明度系数。lucidity 原值是 0.05，叠在深色方块上、或者隔几步远
-     * 就基本看不出来，用户看到的就是“方块没有变色”；上调到 0.3，贴脸到边缘都能看清。
-     */
     private static final float DESTRUCTION_MIN_ALPHA_FACTOR = 0.3F;
-    /** 方块高亮盒微微外扩，避免和方块自身的表面共面而深度闪烁。 */
     private static final double BLOCK_INFLATE = 0.002D;
-    /**
-     * 破坏方块描边的开关阈值：方块数不超过它时，除了橙色填充再补一圈亮橙描边，
-     * 相邻方块之间才有分界、不会糊成一大团橙色。超过阈值（例如 TNT 阵列连环炸）
-     * 就退回纯填充，省下几万条描边线的开销。
-     */
     private static final int MAX_OUTLINED_BLOCKS = 600;
     private static final float BLOCK_STROKE_WIDTH = 1.5F;
     private static final float BLOCK_STROKE_ALPHA = 200.0F / 255.0F;
     /** lucidity 的 explosion_center_color：(220,255,0)。 */
-    private static final int COLOR_CENTER = 0xFFDCFF00;
+    private static int COLOR_CENTER = 0xFFDCFF00;
     /** 射线采样点用爆心色的反色：(35,0,255) 的蓝。 */
-    private static final int RAY_RED = 35;
-    private static final int RAY_GREEN = 0;
-    private static final int RAY_BLUE = 255;
-    /** lucidity 的 sample_point_safe_color：(0,255,30)，alpha 165。 */
-    private static final int COLOR_SAFE = 0xA500FF1E;
-    /** lucidity 的 sample_point_exposed_color：(255,0,0)，alpha 240。 */
-    private static final int COLOR_EXPOSED = 0xF0FF0000;
-    /** 被挡住的安全点回程线用的反色。 */
+    private static int RAY_RED = 35;
+    private static int RAY_GREEN = 0;
+    private static int RAY_BLUE = 255;
+    /** lucidity 的 sample_point_safe_color / exposed_color。 */
+    private static int COLOR_SAFE = 0xA500FF1E;
+    private static int COLOR_EXPOSED = 0xF0FF0000;
+    /** 与玩家相连的判定线（爆炸暴露判定）统一红色。 */
+    private static final int COLOR_PLAYER_LINE = 0xFFFF3B30;
     private static final int COLOR_SAFE_RETURN = 0xA5FF00E1;
-    /** 爆炸源本体：TNT 深蓝、苦力怕绿色。 */
-    private static final int COLOR_TNT_STROKE = 0xFF7E96E8;
-    private static final int COLOR_TNT_FILL = 0x883A4C9E;
-    private static final int COLOR_CREEPER_STROKE = 0xFF8CE08C;
-    private static final int COLOR_CREEPER_FILL = 0x884FA64F;
+    /** 采样点射线线宽。 */
+    private static final float SAMPLE_RAY_WIDTH = 1.5F;
 
-    /**
-     * 光点尺寸，单位是<b>屏幕像素</b>，不是世界坐标：原版 {@code Gizmos.point} 的 size 会
-     * 原样写进 {@code gl_PointSize}（{@code debug_point.vsh} 里就一行
-     * {@code gl_PointSize = LineWidth;}）。
-     * <p>之前这里填的是 0.06 / 0.09 / 0.22 这种“世界尺寸”量级，被当成像素后就只剩亚像素，
-     * 等于什么都没画——<b>这就是“蓝色射线光点”和“实体红点”完全不出现的根因</b>。
-     * 现在按 lucidity 的观感折算成像素：射线点约等于它那个 0.03 格的面向镜头小三角，
-     * 实体伤害采样点稍大，爆心点最大。</p>
-     */
+    /** 爆炸源本体配色。 */
+    private static final int KIND_TNT = 0;
+    private static final int KIND_CREEPER = 1;
+    private static final int KIND_CRYSTAL = 2;
+    private static final int KIND_MINECART = 3;
+    private static final int KIND_SKULL = 4;
+    private static final int KIND_WITHER = 5;
+    private static final int KIND_FIREBALL = 6;
+    private static final int KIND_WIND = 7;
+    private static final int KIND_ANCHOR = 8;
+    private static final int KIND_BED = 9;
+    private static final int[] SOURCE_STROKE = {
+            0xFF7E96E8, 0xFF8CE08C, 0xFFE8D9FF, 0xFFE8D9FF, 0xFFE8D9FF, 0xFFE8D9FF,
+            0xFFE8D9FF, 0xFFE8D9FF, 0xFFE8D9FF, 0xFFE8D9FF};
+    private static final int[] SOURCE_FILL = {
+            0x883A4C9E, 0x884FA64F, 0x88C8A2FF, 0x88C8A2FF, 0x88C8A2FF, 0x88C8A2FF,
+            0x88C8A2FF, 0x88C8A2FF, 0x88C8A2FF, 0x88C8A2FF};
+
+    /** 光点尺寸，单位是屏幕像素。 */
     private static final float RAY_POINT_SIZE = 2.5F;
     private static final float CENTER_POINT_SIZE = 9.0F;
     private static final float SAMPLE_POINT_SIZE = 4.0F;
-    /** 射线采样点透明度最多放大到 2 倍（lucidity 原样）。 */
     private static final float RAY_ALPHA_GAIN = 2.0F;
 
     private static final double ENTITY_INFLATE = 0.02D;
     private static final float SOURCE_STROKE_WIDTH = 2.0F;
 
     /** 淡绿色半透明球：浅绿 + 约 40% 不透明度。 */
-    private static final int COLOR_SPHERE = 0x66B4F0B4;
+    private static int COLOR_SPHERE = 0x66B4F0B4;
+
+    /** 计时器文字颜色：快炸了红、还早黄。 */
+    private static final int TIMER_COLOR_SOON = 0xFFFF3B30;
+    private static final int TIMER_COLOR_LATER = 0xFFFFD21E;
+    /** 计时器离爆炸源包围盒顶面的高度。 */
+    private static final double TIMER_Y_OFFSET = 0.6D;
 
     // —— 单位球壳几何（半径 1），渲染时按各自半径缩放 ——
     private static final int SPHERE_LONGITUDES = 20;
@@ -206,12 +203,15 @@ public final class ExplosionVisualizer {
 
     private static volatile Snapshot snapshot = Snapshot.EMPTY;
     private static int tickCounter;
+    private static int blockTickCounter;
+    private static List<Source> blockSources = Collections.emptyList();
 
     private ExplosionVisualizer() {
     }
 
     /** 客户端入口调用一次：tick 扫描与渲染回调（Ctrl+O 总开关在 {@link VisualizerState}）。 */
     public static void init() {
+        ExplosionVisualizerConfig.ensure();
         ClientTickEvents.END_CLIENT_TICK.register(ExplosionVisualizer::clientTick);
         WorldRenderEvents.BEFORE_DEBUG_RENDER.register(ExplosionVisualizer::renderGizmos);
     }
@@ -220,13 +220,19 @@ public final class ExplosionVisualizer {
         ClientLevel level = client.level;
         if (!VisualizerState.isActive(RULE) || level == null || client.player == null) {
             snapshot = Snapshot.EMPTY;
+            blockSources = Collections.emptyList();
             return;
         }
         if (++tickCounter < SCAN_INTERVAL_TICKS) {
             return;
         }
         tickCounter = 0;
-        snapshot = scan(level, client.player.position());
+        Vec3 playerPos = client.player.position();
+        if (++blockTickCounter >= BLOCK_SCAN_INTERVAL_TICKS) {
+            blockTickCounter = 0;
+            blockSources = scanBlocks(level, playerPos);
+        }
+        snapshot = scan(level, playerPos);
     }
 
     private static Snapshot scan(ClientLevel level, Vec3 playerPos) {
@@ -236,17 +242,20 @@ public final class ExplosionVisualizer {
             if (entity.position().distanceToSqr(playerPos) > searchSqr) {
                 continue;
             }
-            if (entity instanceof PrimedTnt tnt) {
-                sources.add(new Source(entity,
-                        new Vec3(tnt.getX(), tnt.getY() + TNT_CENTER_Y_OFFSET, tnt.getZ()),
-                        TNT_POWER, true, entity.getBoundingBox()));
-            } else if (entity instanceof Creeper creeper && creeper.getSwellDir() > 0) {
-                float power = creeper.isPowered() ? CHARGED_CREEPER_POWER : CREEPER_POWER;
-                sources.add(new Source(entity, creeper.position(), power, false, entity.getBoundingBox()));
+            Source source = sourceOf(entity);
+            if (source != null) {
+                sources.add(source);
             }
             if (sources.size() >= MAX_SOURCES) {
                 break;
             }
+        }
+        // 方块爆炸源（重生锚、床）按较低频率扫描，这里把上次的结果并进来。
+        for (Source source : blockSources) {
+            if (sources.size() >= MAX_SOURCES + MAX_BLOCK_SOURCES) {
+                break;
+            }
+            sources.add(source);
         }
         if (sources.isEmpty()) {
             return Snapshot.EMPTY;
@@ -259,6 +268,108 @@ public final class ExplosionVisualizer {
         return new Snapshot(render);
     }
 
+    /**
+     * 扫描玩家附近的方块爆炸源（移植自 lucidity 的 {@code findExplosivesInRange}）：
+     * 充能过的<b>重生锚</b>在“重生锚不起作用”的维度会爆炸（半径 5）；<b>床</b>在床规则
+     * 判定为会爆炸的维度会爆炸（半径 5）。两者都取方块中心为爆心，威力固定 5。
+     */
+    private static List<Source> scanBlocks(ClientLevel level, Vec3 playerPos) {
+        List<Source> out = new ArrayList<>();
+        BlockPos center = BlockPos.containing(playerPos);
+        int r = BLOCK_SCAN_RADIUS;
+        for (BlockPos pos : BlockPos.betweenClosed(center.offset(-r, -r, -r), center.offset(r, r, r))) {
+            if (out.size() >= MAX_BLOCK_SOURCES) {
+                break;
+            }
+            BlockState state = level.getBlockState(pos);
+            if (state.getBlock() instanceof RespawnAnchorBlock) {
+                int charges = state.getValue(RespawnAnchorBlock.CHARGE);
+                if (charges > 0 && !anchorWorks(level, pos)) {
+                    out.add(blockSource(pos.immutable(), ANCHOR_POWER, KIND_ANCHOR));
+                }
+            } else if (state.getBlock() instanceof BedBlock
+                    && state.getValue(BedBlock.PART) == BedPart.HEAD) {
+                if (bedExplodes(level, pos)) {
+                    out.add(blockSource(pos.immutable(), BED_POWER, KIND_BED));
+                }
+            }
+        }
+        return out;
+    }
+
+    /**
+     * 该位置的重生锚会不会起作用。原版用 {@code EnvironmentAttributes.RESPAWN_ANCHOR_WORKS} 判定；
+     * 客户端读环境属性偶尔可能拿不到采样器，所以这里用 try/catch 兜底：拿不到就按“不起作用”处理，
+     * 让预览照常显示，不会因为一次读取失败整条方块预览消失。
+     */
+    private static boolean anchorWorks(ClientLevel level, BlockPos pos) {
+        try {
+            return level.dimensionType().respawnAnchorWorks();
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    /** 该位置的床会不会爆炸：1.21.10 仍由维度类型决定（床在下界/末地不可用即爆炸）。 */
+    private static boolean bedExplodes(ClientLevel level, BlockPos pos) {
+        try {
+            return !level.dimensionType().bedWorks();
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static Source blockSource(BlockPos pos, float power, int kind) {
+        return new Source(null, Vec3.atCenterOf(pos), power, kind, new AABB(pos), -1, true, pos);
+    }
+
+    /** 把附近的爆炸源实体映射成一个待模拟的 {@link Source}；不是爆炸源时返回 null。 */
+    private static Source sourceOf(Entity entity) {
+        if (entity instanceof PrimedTnt tnt) {
+            return new Source(entity, new Vec3(tnt.getX(), tnt.getY() + TNT_CENTER_Y_OFFSET, tnt.getZ()),
+                    TNT_POWER, KIND_TNT, entity.getBoundingBox(), tnt.getFuse(), true);
+        }
+        if (entity instanceof Creeper creeper && creeper.getSwellDir() > 0) {
+            float power = creeper.isPowered() ? CHARGED_CREEPER_POWER : CREEPER_POWER;
+            int fuse = (int) Math.ceil((1.0F - creeper.getSwelling(0.0F)) * CREEPER_FUSE_TICKS);
+            return new Source(entity, creeper.position(), power, KIND_CREEPER,
+                    entity.getBoundingBox(), fuse, true);
+        }
+        if (entity instanceof EndCrystal) {
+            return new Source(entity, entity.position(), CRYSTAL_POWER, KIND_CRYSTAL,
+                    entity.getBoundingBox(), -1, true);
+        }
+        if (entity instanceof MinecartTNT cart && cart.isPrimed()) {
+            // 原版威力 4.0 + 随机(0~1.5)*速度（速度封顶 5）；这里取上界做确定性预览。
+            double speed = Math.min(Math.sqrt(cart.getDeltaMovement().horizontalDistanceSqr()), 5.0D);
+            float power = (float) (4.0D + speed * 1.5D);
+            return new Source(entity, cart.position(), power, KIND_MINECART,
+                    entity.getBoundingBox(), cart.getFuse(), true);
+        }
+        if (entity instanceof WitherSkull) {
+            return new Source(entity, entity.position(), SKULL_POWER, KIND_SKULL,
+                    entity.getBoundingBox(), -1, true);
+        }
+        if (entity instanceof WitherBoss wither && wither.getInvulnerableTicks() > 0) {
+            return new Source(entity, new Vec3(wither.getX(), wither.getEyeY(), wither.getZ()),
+                    WITHER_POWER, KIND_WITHER, entity.getBoundingBox(), -1, true);
+        }
+        if (entity instanceof LargeFireball) {
+            // 恶魂火球：原版威力由构造参数决定，默认 1；客户端读不到该字段，按默认值预览。
+            return new Source(entity, entity.position(), FIREBALL_POWER, KIND_FIREBALL,
+                    entity.getBoundingBox(), -1, true);
+        }
+        if (entity instanceof BreezeWindCharge) {
+            return new Source(entity, entity.position(), BREEZE_WIND_CHARGE_POWER, KIND_WIND,
+                    entity.getBoundingBox(), -1, false);
+        }
+        if (entity instanceof WindCharge) {
+            return new Source(entity, entity.position(), WIND_CHARGE_POWER, KIND_WIND,
+                    entity.getBoundingBox(), -1, false);
+        }
+        return null;
+    }
+
     /** 对单个爆炸源跑一遍原版射线模型，收集破坏方块、射线采样点与实体伤害采样点。 */
     private static RenderSource simulate(ClientLevel level, Source source) {
         float radius = source.power;
@@ -268,50 +379,55 @@ public final class ExplosionVisualizer {
         Map<Long, Float> affects = new HashMap<>();
         Map<Long, BlockPos> affectedPositions = new HashMap<>();
         List<RayPoint> rayPoints = new ArrayList<>();
-        // 所有射线共享同一套抽稀步长：单条射线最多走 ceil(maxPower / RAY_DECAY) 步，
-        // 1352 条射线全走完就是这个上限；据此算出 stride，保证点云撒满整个球壳且不超预算。
-        int stepsPerRay = (int) Math.ceil(maxPower / RAY_DECAY);
-        int pointStride = Math.max(1,
-                (int) Math.ceil((double) RAYS.length * stepsPerRay / MAX_RAY_POINTS));
-        for (int i = 0; i < RAYS.length; i++) {
-            Vec3 direction = RAYS[i];
-            double x = source.center.x;
-            double y = source.center.y;
-            double z = source.center.z;
-            int step = 0;
-            for (float power = maxPower; power > 0.0F; power -= RAY_DECAY, step++) {
-                BlockPos pos = BlockPos.containing(x, y, z);
-                if (level.isOutsideBuildHeight(pos)) {
-                    break;
-                }
-                BlockState state = level.getBlockState(pos);
-                FluidState fluid = state.getFluidState();
-                if (!state.isAir() || !fluid.isEmpty()) {
-                    float resistance = Math.max(state.getBlock().getExplosionResistance(),
-                            fluid.getExplosionResistance());
-                    power -= (resistance + 0.3F) * 0.3F;
-                }
-                if (power <= 0.0F) {
-                    break;
-                }
-                if (step % pointStride == 0) {
-                    rayPoints.add(new RayPoint(new Vec3(x, y, z), power));
-                }
-                if (!state.isAir()) {
-                    float spent = maxPower - power;
-                    float probability = spent <= minPower ? 1.0F
-                            : spent >= maxPower ? 0.0F
-                                    : (maxPower - spent) / (maxPower - minPower);
-                    long key = pos.asLong();
-                    Float previous = affects.get(key);
-                    if (previous == null || probability > previous) {
-                        affects.put(key, probability);
-                        affectedPositions.put(key, pos.immutable());
+        // 风弹只触发方块、不破坏方块；这类爆炸源跳过整条射线推演，只画范围球与爆炸源本体。
+        if (source.destructs) {
+            int stepsPerRay = (int) Math.ceil(maxPower / RAY_DECAY);
+            int pointStride = Math.max(1,
+                    (int) Math.ceil((double) RAYS.length * stepsPerRay / MAX_RAY_POINTS));
+            for (int i = 0; i < RAYS.length; i++) {
+                Vec3 direction = RAYS[i];
+                double x = source.center.x;
+                double y = source.center.y;
+                double z = source.center.z;
+                int step = 0;
+                for (float power = maxPower; power > 0.0F; power -= RAY_DECAY, step++) {
+                    BlockPos pos = BlockPos.containing(x, y, z);
+                    if (level.isOutsideBuildHeight(pos)) {
+                        break;
                     }
+                    // 方块爆炸源（重生锚、床）的爆心就在源方块里：把它当成空气，否则射线一出发
+                    // 就被源方块的高爆炸抗性挡死，蓝色采样点与破坏方块都不会出现。
+                    boolean isSourceBlock = source.sourceBlock != null && source.sourceBlock.equals(pos);
+                    BlockState state = isSourceBlock ? Blocks.AIR.defaultBlockState()
+                            : level.getBlockState(pos);
+                    FluidState fluid = state.getFluidState();
+                    if (!state.isAir() || !fluid.isEmpty()) {
+                        float resistance = Math.max(state.getBlock().getExplosionResistance(),
+                                fluid.getExplosionResistance());
+                        power -= (resistance + 0.3F) * 0.3F;
+                    }
+                    if (power <= 0.0F) {
+                        break;
+                    }
+                    if (step % pointStride == 0) {
+                        rayPoints.add(new RayPoint(new Vec3(x, y, z), power));
+                    }
+                    if (!state.isAir()) {
+                        float spent = maxPower - power;
+                        float probability = spent <= minPower ? 1.0F
+                                : spent >= maxPower ? 0.0F
+                                        : (maxPower - spent) / (maxPower - minPower);
+                        long key = pos.asLong();
+                        Float previous = affects.get(key);
+                        if (previous == null || probability > previous) {
+                            affects.put(key, probability);
+                            affectedPositions.put(key, pos.immutable());
+                        }
+                    }
+                    x += direction.x * RAY_STEP;
+                    y += direction.y * RAY_STEP;
+                    z += direction.z * RAY_STEP;
                 }
-                x += direction.x * RAY_STEP;
-                y += direction.y * RAY_STEP;
-                z += direction.z * RAY_STEP;
             }
         }
 
@@ -325,8 +441,8 @@ public final class ExplosionVisualizer {
 
         List<EntitySample> samples = collectEntitySamples(level, source, radius);
 
-        return new RenderSource(source.center, radius, source.tnt, source.entityBox, maxPower,
-                blocks, rayPoints, samples);
+        return new RenderSource(source.center, radius, source.kind, source.entityBox, maxPower,
+                source.fuseTicks, blocks, rayPoints, samples);
     }
 
     /**
@@ -337,6 +453,7 @@ public final class ExplosionVisualizer {
         List<EntitySample> samples = new ArrayList<>();
         double reach = radius * 2.0D;
         double reachSqr = reach * reach;
+        Entity localPlayer = Minecraft.getInstance().player;
         int entities = 0;
         for (Entity entity : level.entitiesForRendering()) {
             if (entity == source.entity || entity.position().distanceToSqr(source.center) > reachSqr) {
@@ -345,12 +462,13 @@ public final class ExplosionVisualizer {
             if (++entities > MAX_ENTITIES) {
                 break;
             }
-            sampleEntity(level, entity, source.center, samples);
+            sampleEntity(level, entity, source.center, source.sourceBlock, entity == localPlayer, samples);
         }
         return samples;
     }
 
-    private static void sampleEntity(ClientLevel level, Entity entity, Vec3 center, List<EntitySample> out) {
+    private static void sampleEntity(ClientLevel level, Entity entity, Vec3 center, BlockPos ignore,
+            boolean player, List<EntitySample> out) {
         AABB box = entity.getBoundingBox();
         double stepX = 1.0D / ((box.maxX - box.minX) * 2.0D + 1.0D);
         double stepY = 1.0D / ((box.maxY - box.minY) * 2.0D + 1.0D);
@@ -373,11 +491,11 @@ public final class ExplosionVisualizer {
                     boolean blocked = false;
                     BlockHitResult hit = level.clip(new ClipContext(start, center,
                             ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, entity));
-                    if (hit.getType() == HitResult.Type.BLOCK) {
+                    if (hit.getType() == HitResult.Type.BLOCK && !hit.getBlockPos().equals(ignore)) {
                         blocked = true;
                         end = hit.getLocation();
                     }
-                    out.add(new EntitySample(start, end, blocked));
+                    out.add(new EntitySample(start, end, blocked, player));
                 }
             }
         }
@@ -410,6 +528,7 @@ public final class ExplosionVisualizer {
         if (!VisualizerState.isActive(RULE)) {
             return;
         }
+        refreshColors();
         Snapshot current = snapshot;
         if (current.sources.isEmpty()) {
             return;
@@ -424,63 +543,75 @@ public final class ExplosionVisualizer {
 
     private static void renderSource(RenderSource source, Vec3 camera) {
         // 淡绿色半透明球先画：它是最远的一层，垫在最后面；橙色方块、光点随后叠上去。
-        // 顺序很关键——半透明是“先画的在后、后画的在前”，球画在最后的话会把球内的
-        // 方块和光点整体罩上一层绿，看起来就发浑、不清晰。
-        drawSphere(source.center, source.radius * EDGE_FACTOR, COLOR_SPHERE, camera);
-
-        // 会被炸掉的方块：lucidity 橙色，透明度按概率渐变；方块用精确的那一格 AABB，
-        // 只微微外扩一点点避开与方块表面的共面闪烁。方块不多时再补一圈描边，块与块之间
-        // 才有分界，不会糊成一团橙色。
-        boolean outline = source.blocks.size() <= MAX_OUTLINED_BLOCKS;
-        int stroke = argb(255, 150, 60, (int) (BLOCK_STROKE_ALPHA * 255.0F));
-        for (int i = 0; i < source.blocks.size(); i++) {
-            BlockProbability block = source.blocks.get(i);
-            float alpha = DESTRUCTION_ALPHA * DESTRUCTION_MIN_ALPHA_FACTOR
-                    + block.probability * DESTRUCTION_ALPHA * (1.0F - DESTRUCTION_MIN_ALPHA_FACTOR);
-            int fill = argb(DESTRUCTION_RED, DESTRUCTION_GREEN, DESTRUCTION_BLUE, (int) (alpha * 255.0F));
-            Gizmos.cuboid(new AABB(block.pos).inflate(BLOCK_INFLATE),
-                    outline ? GizmoStyle.strokeAndFill(stroke, BLOCK_STROKE_WIDTH, fill)
-                            : GizmoStyle.fill(fill));
+        if (ExplosionVisualizerConfig.sphere()) {
+            drawSphere(source.center, source.radius * EDGE_FACTOR, COLOR_SPHERE, camera);
         }
 
-        // 射线采样点（线判定）：爆心色的反色蓝小点，越靠近爆心越亮——参考图里的蓝色光点群。
-        for (int i = 0; i < source.rayPoints.size(); i++) {
-            RayPoint point = source.rayPoints.get(i);
-            int alpha = (int) Math.min(255.0F, point.power / source.maxPower * 255.0F * RAY_ALPHA_GAIN);
-            Gizmos.point(point.pos, argb(RAY_RED, RAY_GREEN, RAY_BLUE, alpha), RAY_POINT_SIZE);
+        // 会被炸掉的方块：lucidity 橙色，透明度按概率渐变。
+        if (ExplosionVisualizerConfig.blockDestruction()) {
+            boolean outline = source.blocks.size() <= MAX_OUTLINED_BLOCKS;
+            int stroke = argb(255, 150, 60, (int) (BLOCK_STROKE_ALPHA * 255.0F));
+            for (int i = 0; i < source.blocks.size(); i++) {
+                BlockProbability block = source.blocks.get(i);
+                float alpha = DESTRUCTION_ALPHA * DESTRUCTION_MIN_ALPHA_FACTOR
+                        + block.probability * DESTRUCTION_ALPHA * (1.0F - DESTRUCTION_MIN_ALPHA_FACTOR);
+                int fill = argb(DESTRUCTION_RED, DESTRUCTION_GREEN, DESTRUCTION_BLUE, (int) (alpha * 255.0F));
+                Gizmos.cuboid(new AABB(block.pos).inflate(BLOCK_INFLATE),
+                        outline ? GizmoStyle.strokeAndFill(stroke, BLOCK_STROKE_WIDTH, fill)
+                                : GizmoStyle.fill(fill));
+            }
         }
 
-        // 实体伤害采样点：安全点绿、暴露点红；安全点被挡住时再画一条回程点。
-        for (int i = 0; i < source.samples.size(); i++) {
-            EntitySample sample = source.samples.get(i);
-            Gizmos.point(sample.start, sample.blocked ? COLOR_SAFE : COLOR_EXPOSED, SAMPLE_POINT_SIZE);
-            if (sample.blocked) {
-                Gizmos.point(sample.end, COLOR_SAFE_RETURN, SAMPLE_POINT_SIZE);
+        // 射线采样点（线判定）：爆心色的反色蓝小点，越靠近爆心越亮。
+        if (ExplosionVisualizerConfig.blockRayCast()) {
+            for (int i = 0; i < source.rayPoints.size(); i++) {
+                RayPoint point = source.rayPoints.get(i);
+                int alpha = (int) Math.min(255.0F, point.power / source.maxPower * 255.0F * RAY_ALPHA_GAIN);
+                Gizmos.point(point.pos, argb(RAY_RED, RAY_GREEN, RAY_BLUE, alpha), RAY_POINT_SIZE);
+            }
+        }
+
+        // 实体伤害采样点：安全点绿、暴露点红；可选再从采样点画一条射线。
+        if (ExplosionVisualizerConfig.entitySamplePoints()) {
+            boolean rayCast = ExplosionVisualizerConfig.samplePointRayCast();
+            for (int i = 0; i < source.samples.size(); i++) {
+                EntitySample sample = source.samples.get(i);
+                Gizmos.point(sample.start, sample.blocked ? COLOR_SAFE : COLOR_EXPOSED, SAMPLE_POINT_SIZE);
+                if (rayCast) {
+                    // 与玩家相连的判定线统一画成红色，便于一眼看出自己有没有暴露在爆炸里。
+                    int lineColor = sample.player ? COLOR_PLAYER_LINE
+                            : (sample.blocked ? COLOR_SAFE : COLOR_EXPOSED);
+                    Gizmos.line(sample.start, sample.end, lineColor, SAMPLE_RAY_WIDTH);
+                }
+                if (sample.blocked) {
+                    Gizmos.point(sample.end, COLOR_SAFE_RETURN, SAMPLE_POINT_SIZE);
+                }
             }
         }
 
         // 爆炸中心。
-        Gizmos.point(source.center, COLOR_CENTER, CENTER_POINT_SIZE);
+        if (ExplosionVisualizerConfig.explosionCenter()) {
+            Gizmos.point(source.center, COLOR_CENTER, CENTER_POINT_SIZE);
+        }
 
-        // 爆炸源本体：TNT 深蓝、苦力怕绿色，画在最上层。
-        GizmoStyle body = source.tnt
-                ? GizmoStyle.strokeAndFill(COLOR_TNT_STROKE, SOURCE_STROKE_WIDTH, COLOR_TNT_FILL)
-                : GizmoStyle.strokeAndFill(COLOR_CREEPER_STROKE, SOURCE_STROKE_WIDTH, COLOR_CREEPER_FILL);
-        Gizmos.cuboid(source.entityBox.inflate(ENTITY_INFLATE), body);
+        // 爆炸源的引信倒计时。
+        if (ExplosionVisualizerConfig.explodeTimer() && source.fuseTicks >= 0) {
+            float seconds = source.fuseTicks / 20.0F;
+            int color = seconds <= 1.0F ? TIMER_COLOR_SOON : TIMER_COLOR_LATER;
+            Vec3 at = new Vec3(source.center.x, source.entityBox.maxY + TIMER_Y_OFFSET, source.center.z);
+            Gizmos.billboardText(String.format(java.util.Locale.ROOT, "%.1f", seconds), at,
+                    TextGizmo.Style.forColor(color).withScale(1.0F));
+        }
+
+        // 爆炸源本体，画在最上层。
+        Gizmos.cuboid(source.entityBox.inflate(ENTITY_INFLATE),
+                GizmoStyle.strokeAndFill(SOURCE_STROKE[source.kind], SOURCE_STROKE_WIDTH,
+                        SOURCE_FILL[source.kind]));
     }
 
     /**
-     * 画一个半透明浅绿球：把预先算好的单位球壳顶点按半径缩放、按球心平移后提交。
-     * <b>只画背对镜头的那半面</b>（法线背离相机的一侧），于是无论相机在球外还是球内，
-     * 一条视线都只穿过一层球壳：
-     * <ul>
-     *   <li>相机在球外时，看到的是远侧球面——球里的橙色方块、光点不会被近侧球面再糊上
-     *       一层，内容看得清楚；</li>
-     *   <li>相机在球内时（玩家就站在爆炸半径里，最常见的情况），不会像以前那样把前后两面
-     *       的 800 个面片全部叠上来，透明度翻倍、越看越浑。</li>
-     * </ul>
-     * 调用方把球<b>最先</b>提交：半透明是后画的盖在先画的上面，球垫在最底层，球内的方块、
-     * 光点才能清楚地叠在它前面。
+     * 画一个半透明浅绿球：只画背对镜头的那半面，于是无论相机在球外还是球内，一条视线都只
+     * 穿过一层球壳。
      */
     private static void drawSphere(Vec3 center, float radius, int color, Vec3 camera) {
         GizmoStyle style = GizmoStyle.fill(color);
@@ -489,7 +620,6 @@ public final class ExplosionVisualizer {
             Vec3[] upper = SPHERE_RINGS[band + 1];
             for (int j = 0; j < SPHERE_LONGITUDES; j++) {
                 Vec3 quadCenter = center.add(SPHERE_QUAD_CENTERS[band][j].scale(radius));
-                // 丢弃法线朝向相机的面片，只留下背离相机的一层，保证一条视线最多穿过一层球壳。
                 if (SPHERE_QUAD_NORMALS[band][j].dot(camera.subtract(quadCenter)) > 0.0D) {
                     continue;
                 }
@@ -503,6 +633,22 @@ public final class ExplosionVisualizer {
         }
     }
 
+    /** 每次绘制前把配色从配置读进来，于是配置界面的改动立刻生效。 */
+    private static void refreshColors() {
+        int destruction = VisualizerConfig.color(RULE, "destruction", 0xFFFF7A1E);
+        DESTRUCTION_RED = (destruction >> 16) & 0xFF;
+        DESTRUCTION_GREEN = (destruction >> 8) & 0xFF;
+        DESTRUCTION_BLUE = destruction & 0xFF;
+        COLOR_CENTER = VisualizerConfig.color(RULE, "center", 0xFFDCFF00);
+        int ray = VisualizerConfig.color(RULE, "ray", 0xFF2300FF);
+        RAY_RED = (ray >> 16) & 0xFF;
+        RAY_GREEN = (ray >> 8) & 0xFF;
+        RAY_BLUE = ray & 0xFF;
+        COLOR_SAFE = VisualizerConfig.color(RULE, "safe", 0xA500FF1E);
+        COLOR_EXPOSED = VisualizerConfig.color(RULE, "exposed", 0xF0FF0000);
+        COLOR_SPHERE = VisualizerConfig.color(RULE, "sphere", 0x66B4F0B4);
+    }
+
     private static int argb(int red, int green, int blue, int alpha) {
         return (Mth.clamp(alpha, 0, 255) << 24) | (red << 16) | (green << 8) | blue;
     }
@@ -512,15 +658,30 @@ public final class ExplosionVisualizer {
         private final Entity entity;
         private final Vec3 center;
         private final float power;
-        private final boolean tnt;
+        private final int kind;
         private final AABB entityBox;
+        /** 引信剩余 tick；没有倒计时的爆炸源为 -1。 */
+        private final int fuseTicks;
+        /** 这次爆炸会不会破坏方块（风弹只触发方块，为 false）。 */
+        private final boolean destructs;
+        /** 方块爆炸源所在方块；实体爆炸源为 null。射线推演时把源方块当成空气，否则会立刻被它挡死。 */
+        private final BlockPos sourceBlock;
 
-        private Source(Entity entity, Vec3 center, float power, boolean tnt, AABB entityBox) {
+        private Source(Entity entity, Vec3 center, float power, int kind, AABB entityBox,
+                int fuseTicks, boolean destructs) {
+            this(entity, center, power, kind, entityBox, fuseTicks, destructs, null);
+        }
+
+        private Source(Entity entity, Vec3 center, float power, int kind, AABB entityBox,
+                int fuseTicks, boolean destructs, BlockPos sourceBlock) {
             this.entity = entity;
             this.center = center;
             this.power = power;
-            this.tnt = tnt;
+            this.kind = kind;
             this.entityBox = entityBox;
+            this.fuseTicks = fuseTicks;
+            this.destructs = destructs;
+            this.sourceBlock = sourceBlock;
         }
     }
 
@@ -528,20 +689,23 @@ public final class ExplosionVisualizer {
     private static final class RenderSource {
         private final Vec3 center;
         private final float radius;
-        private final boolean tnt;
+        private final int kind;
         private final AABB entityBox;
         private final float maxPower;
+        private final int fuseTicks;
         private final List<BlockProbability> blocks;
         private final List<RayPoint> rayPoints;
         private final List<EntitySample> samples;
 
-        private RenderSource(Vec3 center, float radius, boolean tnt, AABB entityBox, float maxPower,
-                List<BlockProbability> blocks, List<RayPoint> rayPoints, List<EntitySample> samples) {
+        private RenderSource(Vec3 center, float radius, int kind, AABB entityBox, float maxPower,
+                int fuseTicks, List<BlockProbability> blocks, List<RayPoint> rayPoints,
+                List<EntitySample> samples) {
             this.center = center;
             this.radius = radius;
-            this.tnt = tnt;
+            this.kind = kind;
             this.entityBox = entityBox;
             this.maxPower = maxPower;
+            this.fuseTicks = fuseTicks;
             this.blocks = blocks;
             this.rayPoints = rayPoints;
             this.samples = samples;
@@ -575,11 +739,14 @@ public final class ExplosionVisualizer {
         private final Vec3 start;
         private final Vec3 end;
         private final boolean blocked;
+        /** 这个采样点是否属于本地玩家（与玩家相连的判定线画成红色）。 */
+        private final boolean player;
 
-        private EntitySample(Vec3 start, Vec3 end, boolean blocked) {
+        private EntitySample(Vec3 start, Vec3 end, boolean blocked, boolean player) {
             this.start = start;
             this.end = end;
             this.blocked = blocked;
+            this.player = player;
         }
     }
 

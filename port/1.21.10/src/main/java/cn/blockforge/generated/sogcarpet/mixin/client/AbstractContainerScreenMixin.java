@@ -6,6 +6,7 @@ import cn.blockforge.generated.sogcarpet.client.FakeRenderHelpWidget;
 import cn.blockforge.generated.sogcarpet.client.SogFakeRenderState;
 import cn.blockforge.generated.sogcarpet.client.SogFakeToolsState;
 import cn.blockforge.generated.sogcarpet.client.VerticalDistanceSlider;
+import cn.blockforge.generated.sogcarpet.client.WorldEaterHelperVisualizer;
 import cn.blockforge.generated.sogcarpet.net.FakeRenderInfoPayload;
 import cn.blockforge.generated.sogcarpet.net.FakeRenderSetPayload;
 import cn.blockforge.generated.sogcarpet.net.FakeToolsInfoPayload;
@@ -22,6 +23,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
  * 在 GCA 假人背包界面左侧加入渲染距离/模拟距离两条竖向滑条。
@@ -162,5 +164,20 @@ public abstract class AbstractContainerScreenMixin<T extends AbstractContainerMe
         int render = isRender ? value : pair[0] == null ? info.render() : pair[0].sog$getValue();
         int simulation = isRender ? pair[1] == null ? info.simulation() : pair[1].sog$getValue() : value;
         ClientPlayNetworking.send(new FakeRenderSetPayload(info.fake(), render, simulation));
+    }
+
+    /**
+     * Ctrl+E 打开世吞小助手的配置界面，<b>即使物品栏（或任何容器界面）开着</b>。
+     *
+     * <p>界面开着时原版根本不派发 {@code KeyMapping} 点击，而 {@code AbstractContainerScreen#keyPressed}
+     * 又会把 E 当成“关闭界面”吃掉，于是 Ctrl+E 只会关掉物品栏、配置界面永远打不开。
+     * 这里在容器界面处理按键之前先把 Ctrl+E 接过来。</p>
+     */
+    @Inject(method = "keyPressed", at = @At("HEAD"), cancellable = true)
+    private void sog$ctrlEOpensWorldEaterConfig(net.minecraft.client.input.KeyEvent event,
+            CallbackInfoReturnable<Boolean> cir) {
+        if (WorldEaterHelperVisualizer.sog$openConfigFromKey(event)) {
+            cir.setReturnValue(Boolean.TRUE);
+        }
     }
 }

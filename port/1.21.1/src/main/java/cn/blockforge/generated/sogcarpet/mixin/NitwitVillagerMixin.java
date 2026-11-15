@@ -1,8 +1,7 @@
 package cn.blockforge.generated.sogcarpet.mixin;
 
 import cn.blockforge.generated.sogcarpet.SogSettings;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.server.level.ServerLevel;import net.minecraft.world.entity.ai.memory.MemoryModuleType;
+import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.entity.npc.VillagerData;
 import net.minecraft.world.entity.npc.VillagerProfession;
@@ -39,7 +38,8 @@ public abstract class NitwitVillagerMixin {
         Villager self = (Villager) (Object) this;
         VillagerData data = self.getVillagerData();
         if (data.getProfession() == VillagerProfession.NITWIT) {
-            // 1.21.4 职业还是普通对象：直接把 NONE 写回 VillagerData。
+            // 1.21.3 的 VillagerData 直接持有 VillagerProfession 对象（不是 Holder），
+            // 所以和原版其它地方一样直接写回 VillagerProfession.NONE。
             self.setVillagerData(data.setProfession(VillagerProfession.NONE));
         }
     }
@@ -59,7 +59,8 @@ public abstract class NitwitVillagerMixin {
      * 都没有（{@code SleepInBed} 与 {@code SetWalkTargetFromBlockMemory} 都要求 HOME
      * 存在）。配合 {@link NitwitBrainMixin} 与 {@link NitwitSleepMixin}，傻子不会上床。</p>
      */
-    @Inject(method = "customServerAiStep()V", at = @At("HEAD"))
+    // 1.21.x 的 customServerAiStep() 不带 ServerLevel 参数（那是 1.21.2+ 才改的）。
+    @Inject(method = "customServerAiStep", at = @At("HEAD"))
     private void sog$nitwitGiveUpBed(CallbackInfo ci) {
         if (!SogSettings.nitwitBedDisabled) {
             return;

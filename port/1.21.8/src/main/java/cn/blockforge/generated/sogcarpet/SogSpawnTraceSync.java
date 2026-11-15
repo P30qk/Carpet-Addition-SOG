@@ -1,5 +1,6 @@
 package cn.blockforge.generated.sogcarpet;
 
+import cn.blockforge.generated.sogcarpet.net.SpawnStatsPayload;
 import cn.blockforge.generated.sogcarpet.net.SpawnTracePayload;
 import cn.blockforge.generated.sogcarpet.net.SpawnTraceWantPayload;
 import java.util.ArrayList;
@@ -48,6 +49,10 @@ public final class SogSpawnTraceSync {
     private static final Set<UUID> OPT_OUT = ConcurrentHashMap.newKeySet();
     /** 残留项超过这个数就清理一次离线玩家。 */
     private static final int OPT_OUT_PRUNE_THRESHOLD = 256;
+    /** 刷怪统计快照的下发间隔（服务端 tick），约一秒一次。 */
+    private static final int STATS_INTERVAL_TICKS = 20;
+
+    private static int statsTickCounter;
 
     private SogSpawnTraceSync() {
     }
@@ -64,9 +69,11 @@ public final class SogSpawnTraceSync {
 
     /** 挂在 {@code ServerTickEvents.END_SERVER_TICK} 上，每个服务端 tick 调一次。 */
     public static void onEndServerTick(MinecraftServer server) {
-        if (!SogSettings.mobSpawnVisualizer) {
-            // 规则关闭时不采集也不下发；队列由规则观察器在关闭那一刻清空。
+        if (!SogSettings.mobSpawnVisualizer && !SogSettings.spawnStatsVisualizer) {
+            // 两条相关规则都关闭时不采集也不下发；队列由规则观察器在关闭那一刻清空。
             SogSpawnTrace.setRecording(false);
+            SogSpawnStats.setRecording(false);
+            SogSpawnStats.clear();
             SogSpawnTrace.drain();
             return;
         }
@@ -79,13 +86,30 @@ public final class SogSpawnTraceSync {
             // 这条可视化是开的（命令给没装模组的玩家配的清单同样在这里生效）。
             if (!OPT_OUT.contains(player.getUUID())
                     && ServerPlayNetworking.canSend(player, SpawnTracePayload.TYPE)
-                    && SogVisualizerPrefs.isRenderEnabled(player.getUUID(), "mobSpawnVisualizer")) {
+                    && (SogVisualizerPrefs.isRenderEnabled(player.getUUID(), "mobSpawnVisualizer")
+                            || SogVisualizerPrefs.isRenderEnabled(player.getUUID(), "spawnStatsVisualizer"))) {
                 listeners.add(player);
             }
         }
         // 没有任何装了本模组的在线玩家时，服务端连采集都省掉（下一 tick 生效）。
         SogSpawnTrace.setRecording(!listeners.isEmpty());
+        SogSpawnStats.setRecording(!listeners.isEmpty());
         List<SogSpawnTrace.SpawnEvent> drained = SogSpawnTrace.drain();
+
+        // 刷怪成功概率统计：约每秒给每个听众发一份很小的快照（尝试/成功次数）。
+        if (++statsTickCounter >= STATS_INTERVAL_TICKS) {
+            statsTickCounter = 0;
+            if (!listeners.isEmpty()) {
+                List<SogSpawnStats.CategoryStat> stats = SogSpawnStats.snapshot();
+                if (!stats.isEmpty()) {
+                    SpawnStatsPayload payload = new SpawnStatsPayload(stats);
+                    for (ServerPlayer player : listeners) {
+                        ServerPlayNetworking.send(player, payload);
+                    }
+                }
+            }
+        }
+
         if (drained.isEmpty() || listeners.isEmpty()) {
             return;
         }

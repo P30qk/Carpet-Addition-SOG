@@ -27,38 +27,113 @@ import net.minecraft.resources.Identifier;
 public final class WorldEaterConfigScreen extends Screen {
     private WorldEaterBlockList list;
     private EditBox searchBox;
+    private EditBox liftBox;
     private Button autoButton;
     private Button hiddenButton;
+    private Button heightLimitButton;
+    private Button distanceButton;
     private int left;
     private int listWidth = 420;
     private String filter = "";
     private Component status;
     private int statusColor = 0xFF9AD17A;
+    private final Screen parent;
 
     public WorldEaterConfigScreen() {
+        this(null);
+    }
+
+    public WorldEaterConfigScreen(Screen parent) {
         super(Component.translatable("sog_carpet.ui.world_eater.title"));
+        this.parent = parent;
     }
 
     @Override
     protected void init() {
         WorldEaterConfig.ensureLoaded();
-        this.listWidth = Math.min(this.width - 40, 420);
-        this.left = (this.width - this.listWidth) / 2;
+        this.listWidth = Math.max(200, Math.min(this.width - 16, 420));
+        this.left = Math.max(8, (this.width - this.listWidth) / 2);
+        int gap = 6;
+        // 三行控件全部按 listWidth 动态分配宽度，窄屏时一起收缩，保证互不重叠。
+        int doneWidth = Math.max(48, Math.min(64, this.listWidth / 6));
+        int resetWidth = Math.max(48, Math.min(76, this.listWidth / 5));
+        int autoWidth = Math.max(70, this.listWidth - doneWidth - resetWidth - 2 * gap);
 
         this.autoButton = Button.builder(autoLabel(), button -> {
             WorldEaterConfig.setAutoWaterlogged(!WorldEaterConfig.isAutoWaterlogged());
             button.setMessage(autoLabel());
             this.list.refresh();
-        }).bounds(this.left, 36, 130, 20).build();
+        }).bounds(this.left, 36, autoWidth, 20).build();
         addRenderableWidget(this.autoButton);
 
         // 被上方方块完全盖住的补挖方块要不要照常标出来（默认开：世吞的机器就压在上面；
         // 幽灵原位如果还埋在实心方块里，渲染时会自动抬到最近的空位并置顶）。
+        int hiddenWidth = Math.max(80, this.listWidth - doneWidth - gap);
         this.hiddenButton = Button.builder(hiddenLabel(), button -> {
             WorldEaterConfig.setMarkHidden(!WorldEaterConfig.isMarkHidden());
             button.setMessage(hiddenLabel());
-        }).bounds(this.left, 60, Math.min(200, this.listWidth), 20).build();
+        }).bounds(this.left, 60, hiddenWidth, 20).build();
         addRenderableWidget(this.hiddenButton);
+
+        // 高度限制：抬得太高（≥ 阈值）的幽灵方块不画。默认开、阈值 8 格，可以手动输入。
+        int valueWidth = Math.max(28, Math.min(42, this.listWidth / 8));
+        int applyWidth = Math.max(38, Math.min(48, this.listWidth / 7));
+        int heightWidth = Math.max(60,
+                this.listWidth - valueWidth - applyWidth - 2 * gap);
+        this.heightLimitButton = Button.builder(heightLimitLabel(), button -> {
+            WorldEaterConfig.setHeightLimit(!WorldEaterConfig.isHeightLimit());
+            button.setMessage(heightLimitLabel());
+            if (this.liftBox != null) {
+                this.liftBox.active = WorldEaterConfig.isHeightLimit();
+            }
+            setStatus(Component.translatable(WorldEaterConfig.isHeightLimit()
+                    ? "sog_carpet.ui.world_eater.height_on_done"
+                    : "sog_carpet.ui.world_eater.height_off_done"), 0xFF9AD17A);
+        }).bounds(this.left, 84, heightWidth, 20).build();
+        addRenderableWidget(this.heightLimitButton);
+
+        this.liftBox = new EditBox(this.font, this.left + heightWidth + gap, 84, valueWidth, 20,
+                Component.translatable("sog_carpet.ui.world_eater.height_value"));
+        this.liftBox.setMaxLength(3);
+        this.liftBox.setValue(Integer.toString(WorldEaterConfig.maxGhostLift()));
+        this.liftBox.setHint(Component.translatable("sog_carpet.ui.world_eater.height_value"));
+        // 输入合法数字就立即生效；不合法时回填当前值，避免留在框里误导。
+        this.liftBox.setResponder(text -> {
+            int value = WorldEaterConfig.parseGhostLift(text);
+            if (value > 0) {
+                WorldEaterConfig.setMaxGhostLift(value);
+            }
+        });
+        this.liftBox.active = WorldEaterConfig.isHeightLimit();
+        addRenderableWidget(this.liftBox);
+
+        addRenderableWidget(Button.builder(
+                        Component.translatable("sog_carpet.ui.world_eater.height_apply"), button -> {
+                            int value = WorldEaterConfig.parseGhostLift(this.liftBox.getValue());
+                            if (value <= 0) {
+                                this.liftBox.setValue(
+                                        Integer.toString(WorldEaterConfig.maxGhostLift()));
+                                setStatus(Component.translatable(
+                                        "sog_carpet.ui.world_eater.height_invalid"), 0xFFFF8080);
+                                return;
+                            }
+                            WorldEaterConfig.setMaxGhostLift(value);
+                            this.liftBox.setValue(Integer.toString(value));
+                            setStatus(Component.translatable(
+                                    "sog_carpet.ui.world_eater.height_saved", value), 0xFF9AD17A);
+                        })
+                .bounds(this.left + heightWidth + gap + valueWidth + gap, 84, applyWidth, 20)
+                .build());
+
+        // 真方块 / 映射方块距离标注（默认关闭）：单独一行，避免和上面三行挤在一起。
+        this.distanceButton = Button.builder(distanceLabel(), button -> {
+            WorldEaterConfig.setDistanceShown(!WorldEaterConfig.isDistanceShown());
+            button.setMessage(distanceLabel());
+            setStatus(Component.translatable(WorldEaterConfig.isDistanceShown()
+                    ? "sog_carpet.ui.world_eater.distance_on_done"
+                    : "sog_carpet.ui.world_eater.distance_off_done"), 0xFF9AD17A);
+        }).bounds(this.left, 108, Math.min(220, this.listWidth), 20).build();
+        addRenderableWidget(this.distanceButton);
 
         addRenderableWidget(Button.builder(
                         Component.translatable("sog_carpet.ui.world_eater.reset"), button -> {
@@ -66,18 +141,35 @@ public final class WorldEaterConfigScreen extends Screen {
                             this.list.refresh();
                             this.autoButton.setMessage(autoLabel());
                             this.hiddenButton.setMessage(hiddenLabel());
+                            if (this.distanceButton != null) {
+                                this.distanceButton.setMessage(distanceLabel());
+                            }
+                            if (this.heightLimitButton != null) {
+                                this.heightLimitButton.setMessage(heightLimitLabel());
+                            }
+                            if (this.liftBox != null) {
+                                this.liftBox.setValue(
+                                        Integer.toString(WorldEaterConfig.maxGhostLift()));
+                                this.liftBox.active = WorldEaterConfig.isHeightLimit();
+                            }
                             setStatus(Component.translatable("sog_carpet.ui.world_eater.reset_done"),
                                     0xFF9AD17A);
                         })
-                .bounds(this.left + 136, 36, 76, 20)
+                .bounds(this.left + autoWidth + gap, 36, resetWidth, 20)
                 .build());
 
         addRenderableWidget(Button.builder(
                         Component.translatable("sog_carpet.ui.world_eater.done"), button -> onClose())
-                .bounds(this.left + this.listWidth - 64, 36, 64, 20)
+                .bounds(this.left + this.listWidth - doneWidth, 36, doneWidth, 20)
                 .build());
 
-        int listTop = 94;
+        addRenderableWidget(Button.builder(
+                        Component.translatable("sog_carpet.ui.color.button"),
+                        button -> VisualizerState.openColorScreen("worldEaterHelper", this))
+                .bounds(this.left + this.listWidth - doneWidth, 60, doneWidth, 20)
+                .build());
+
+        int listTop = 134;
         int listBottom = this.height - 52;
         this.list = new WorldEaterBlockList(this.left, listTop, this.listWidth,
                 Math.max(40, listBottom - listTop), this::onListChanged);
@@ -105,6 +197,18 @@ public final class WorldEaterConfigScreen extends Screen {
         return Component.translatable(WorldEaterConfig.isAutoWaterlogged()
                 ? "sog_carpet.ui.world_eater.auto_on"
                 : "sog_carpet.ui.world_eater.auto_off");
+    }
+
+    private static Component heightLimitLabel() {
+        return Component.translatable(WorldEaterConfig.isHeightLimit()
+                ? "sog_carpet.ui.world_eater.height_on"
+                : "sog_carpet.ui.world_eater.height_off");
+    }
+
+    private static Component distanceLabel() {
+        return Component.translatable(WorldEaterConfig.isDistanceShown()
+                ? "sog_carpet.ui.world_eater.distance_on"
+                : "sog_carpet.ui.world_eater.distance_off");
     }
 
     private static Component hiddenLabel() {
@@ -154,9 +258,13 @@ public final class WorldEaterConfigScreen extends Screen {
             float partialTick) {
         extractor.fill(0, 0, this.width, this.height, 0xB0101014);
         super.render(extractor, mouseX, mouseY, partialTick);
-        extractor.drawCenteredString(this.font, this.title, this.width / 2, 8, 0xFFFFFFFF);
-        extractor.drawString(this.font, Component.translatable("sog_carpet.ui.world_eater.hint"),
-                this.left, 22, 0xFFA8B0B8, false);
+        extractor.drawCenteredString(this.font, this.title, this.width / 2, 6, 0xFFFFFFFF);
+        String hint = Component.translatable("sog_carpet.ui.world_eater.hint").getString();
+        if (this.font != null && this.font.width(hint) > this.listWidth) {
+            hint = this.font.plainSubstrByWidth(hint, Math.max(0, this.listWidth - 6)) + "…";
+        }
+        extractor.drawString(this.font, Component.literal(hint),
+                this.left, 20, 0xFFA8B0B8, false);
 
         // 表格列头：跟列表的实际列位置严格对齐，避免出现“文字压在一起”的观感。
         int headerY = this.list == null ? 62 : this.list.getY() - 11;
@@ -193,6 +301,10 @@ public final class WorldEaterConfigScreen extends Screen {
     @Override
     public void onClose() {
         WorldEaterConfig.save();
-        super.onClose();
+        if (this.parent != null && this.minecraft != null) {
+            this.minecraft.setScreenAndShow(this.parent);
+        } else {
+            super.onClose();
+        }
     }
 }

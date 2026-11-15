@@ -22,8 +22,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * 给 carpet 假人挂上每假人独立的渲染/模拟距离设置。
  *
  * <p>渲染距离走原版按玩家生效的 requestedViewDistance（{@link ServerPlayer#updateOptions}），
- * 并额外补一张 PLAYER_LOADING 区域票把假人周围的加载半径向外扩展；模拟距离补一张
- * PLAYER_SIMULATION 区域票。原版给玩家的票据按全局半径发放、无法按玩家缩小，
+ * 并额外补一张 PLAYER 区域票把假人周围的加载半径向外扩展（1.21.3 的票据只有 PLAYER 一种，
+ * 渲染距离与模拟距离取较大者当半径；更后面的版本才把它们拆成 PLAYER_LOADING / PLAYER_SIMULATION）。
+ * 原版给玩家的票据按全局半径发放、无法按玩家缩小，
  * 因此这两个滑条的语义是“在玩家默认值基础上扩展”，低于默认值时以默认值为准。</p>
  *
  * <p><b>“跟随玩家”的实现</b>：两个字段用包装类型，{@code null} 即跟随。跟随状态既
@@ -54,8 +55,6 @@ public abstract class EntityPlayerMPFakeMixin extends ServerPlayer implements So
     private int sog$ticketCz;
     private boolean sog$loadTicketOn;
     private int sog$loadTicketRadius;
-    private boolean sog$simTicketOn;
-    private int sog$simTicketRadius;
 
     // Mixin 要求混入类的构造器与目标的一个构造器签名完全一致（它不会被合并，
     // 只用于校验 super 调用链）。carpet 26.2 的假人构造器是 5 参（末尾 isAShadow）。
@@ -107,6 +106,8 @@ public abstract class EntityPlayerMPFakeMixin extends ServerPlayer implements So
     /** 原版按玩家视距：重写 ClientInformation 里的 viewDistance，其余字段原样保留。 */
     private void sog$applyViewDistance(int value) {
         ClientInformation ci = this.clientInformation();
+        // 1.21.x 的 ClientInformation 只有 8 个字段（particleStatus 是 1.21.2+ 才加的），
+        // 这里按 8 参构造重建，其余字段原样保留。
         this.updateOptions(new ClientInformation(ci.language(), value, ci.chatVisibility(),
                 ci.chatColors(), ci.modelCustomisation(), ci.mainHand(),
                 ci.textFilteringEnabled(), ci.allowsListing()));
@@ -142,15 +143,14 @@ public abstract class EntityPlayerMPFakeMixin extends ServerPlayer implements So
         ServerLevel level = (ServerLevel) this.level();
         ChunkPos pos = this.chunkPosition();
         ServerChunkCache source = level.getChunkSource();
-        if (render >= 0) {
-            source.addRegionTicket(TicketType.PLAYER, pos, render, pos);
+        // 1.21.3 的区块票据只有一个玩家票据（PLAYER_LOADING / PLAYER_SIMULATION 要到更后面的
+        // 版本才拆开），所以这里用“渲染距离与模拟距离取较大者”挂一张玩家票据：两个滑条仍然各自
+        // 保存，实际生效的是其中更大的那个半径，不会因为版本差异把假人周围的区块卸掉。
+        int radius = Math.max(render, simulation);
+        if (radius >= 0) {
+            source.addRegionTicket(TicketType.PLAYER, pos, radius, pos);
             this.sog$loadTicketOn = true;
-            this.sog$loadTicketRadius = render;
-        }
-        if (simulation >= 0) {
-            source.addRegionTicket(TicketType.PLAYER, pos, simulation, pos);
-            this.sog$simTicketOn = true;
-            this.sog$simTicketRadius = simulation;
+            this.sog$loadTicketRadius = radius;
         }
         this.sog$ticketLevel = level;
         this.sog$ticketCx = pos.x;
@@ -171,10 +171,6 @@ public abstract class EntityPlayerMPFakeMixin extends ServerPlayer implements So
         if (this.sog$loadTicketOn) {
             source.removeRegionTicket(TicketType.PLAYER, old, this.sog$loadTicketRadius, old);
             this.sog$loadTicketOn = false;
-        }
-        if (this.sog$simTicketOn) {
-            source.removeRegionTicket(TicketType.PLAYER, old, this.sog$simTicketRadius, old);
-            this.sog$simTicketOn = false;
         }
         this.sog$ticketLevel = null;
     }
@@ -203,11 +199,8 @@ public abstract class EntityPlayerMPFakeMixin extends ServerPlayer implements So
         }
     }
 
-    @Inject(method = "kill()V", at = @At("HEAD"))
-    private void sog$onKill(CallbackInfo ci) {
-        this.sog$removeRenderTickets();
-    }
-
+    // 1.21.x 的 carpet 假人只有一个 kill(Component) 重写（carpet 1.4.158 起才补的
+    // kill(ServerLevel) 在这里不存在，原版 ServerPlayer 也没有那个方法），所以只挂这一个入口。
     @Inject(method = "kill(Lnet/minecraft/network/chat/Component;)V", at = @At("HEAD"))
     private void sog$onKillMessage(net.minecraft.network.chat.Component reason, CallbackInfo ci) {
         this.sog$removeRenderTickets();

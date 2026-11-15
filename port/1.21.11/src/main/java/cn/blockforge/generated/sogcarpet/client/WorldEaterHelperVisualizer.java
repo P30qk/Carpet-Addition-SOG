@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
@@ -18,6 +19,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.client.renderer.block.BlockModelShaper;
+import net.minecraft.client.renderer.block.BlockRenderDispatcher;
 import net.minecraft.client.renderer.block.model.BlockModelPart;
 import net.minecraft.client.renderer.block.model.BlockStateModel;
 import net.minecraft.client.renderer.rendertype.RenderTypes;
@@ -26,6 +28,8 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.gizmos.GizmoProperties;
 import net.minecraft.gizmos.GizmoStyle;
 import net.minecraft.gizmos.Gizmos;
+import net.minecraft.gizmos.TextGizmo;
+import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 import net.minecraft.util.RandomSource;
 import net.minecraft.world.entity.player.Player;
@@ -36,7 +40,6 @@ import net.minecraft.world.level.chunk.LevelChunk;
 import net.minecraft.world.level.chunk.LevelChunkSection;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.lwjgl.glfw.GLFW;
 
 /**
  * “世吞小助手”的客户端实现（移植自 lucidity 的 World Eater Mine Helper）。
@@ -101,8 +104,14 @@ public final class WorldEaterHelperVisualizer {
 
     /** 含水方块外面那层“水壳”：包住内部方块模型，半透明水色。 */
     private static final double WATER_INFLATE = 0.06D;
-    private static final int WATER_FILL = 0x66C6E6FF;
-    private static final int WATER_RIM = 0xCCE6F6FF;
+    private static int WATER_FILL = 0x66C6E6FF;
+    private static int WATER_RIM = 0xCCE6F6FF;
+
+    /** 从用户配置刷新颜色（没有配置时回落到默认值）。 */
+    private static void refreshColors() {
+        WATER_FILL = VisualizerConfig.color(RULE, "waterFill", 0x66C6E6FF);
+        WATER_RIM = VisualizerConfig.color(RULE, "waterRim", 0xCCE6F6FF);
+    }
 
     /** 颜色分类与方块白名单统一放在 {@link WorldEaterConfig} 里，配置界面共用同一套定义。 */
 
@@ -135,7 +144,7 @@ public final class WorldEaterHelperVisualizer {
     public static void init() {
         WorldEaterConfig.ensureLoaded();
         configKey = KeyBindingHelper.registerKeyBinding(new KeyMapping(
-                "key.sog_carpet.world_eater_config", GLFW.GLFW_KEY_E, KeyMapping.Category.MISC));
+                "key.sog_carpet.world_eater_config", 69, KeyMapping.Category.MISC));
         // Ctrl+E 必须赶在 handleKeybinds() 之前处理，否则物品栏会先被 E 打开。
         ClientTickEvents.START_CLIENT_TICK.register(WorldEaterHelperVisualizer::clientTickStart);
         ClientTickEvents.END_CLIENT_TICK.register(WorldEaterHelperVisualizer::clientTick);
@@ -148,6 +157,7 @@ public final class WorldEaterHelperVisualizer {
      * 保证只打开配置界面。配置界面只改客户端白名单，所以不再要求先开服务端规则。
      */
     private static void clientTickStart(Minecraft client) {
+        sog$flushPendingOpen(client);
         while (configKey.consumeClick()) {
             if (!isCtrlDown(client) || client.level == null) {
                 continue;
@@ -160,10 +170,69 @@ public final class WorldEaterHelperVisualizer {
         }
     }
 
+    /** 键盘回调里排队的“Ctrl+E 打开配置界面”（真正 setScreen 放到客户端 tick，避免重入界面生命周期）。 */
+    private static volatile boolean openPending;
+
+    /** 键盘回调判定命中 Ctrl+E 后调用：排队一次打开（这次按键由 mixin 整个吃掉）。 */
+    public static void sog$queueOpen() {
+        openPending = true;
+    }
+
+    /**
+     * START_CLIENT_TICK：把排队的一次“Ctrl+E”落实成配置界面。
+     *
+     * <p>同一个 E 还会让原版 {@code keyInventory} 记一次点击，这里连它一起吞掉，
+     * 否则配置界面刚打开就会被物品栏顶掉。</p>
+     */
+    private static void sog$flushPendingOpen(Minecraft client) {
+        if (!openPending) {
+            return;
+        }
+        openPending = false;
+        if (client == null || client.level == null) {
+            return;
+        }
+        while (configKey.consumeClick()) {
+            // 吞掉同一个 E 触发的配置键点击，下面用排队的那次统一处理。
+        }
+        while (client.options.keyInventory.consumeClick()) {
+            // 吞掉同一个 E 触发的物品栏，避免配置界面被它顶掉。
+        }
+        client.setScreenAndShow(new WorldEaterConfigScreen(client.screen));
+    }
+
+    /** 供键盘 mixin 判定 Ctrl 是否按住（各版本取法不同，统一收在这里）。 */
+    public static boolean sog$isCtrlDown(Minecraft client) {
+        return client != null && isCtrlDown(client);
+    }
+
+    /** 这个键是不是“Ctrl+E 打开配置界面”绑定的那个键（键位可以被玩家改）。 */
+    public static boolean sog$matchesConfigKey(net.minecraft.client.input.KeyEvent event) {
+        return configKey != null && event != null && configKey.matches(event);
+    }
+
+    /**
+     * 界面里按下 Ctrl+E 时调用：条件满足就打开配置界面并返回 {@code true}。
+     *
+     * <p>物品栏这类容器界面开着时，原版既不派发 {@code KeyMapping} 点击，又会把 E 当成
+     * “关闭界面”吃掉，所以要在界面处理按键之前先把 Ctrl+E 接过来
+     * （见 {@code AbstractContainerScreenMixin#sog$ctrlEOpensWorldEaterConfig}）。</p>
+     */
+    public static boolean sog$openConfigFromKey(net.minecraft.client.input.KeyEvent event) {
+        Minecraft client = Minecraft.getInstance();
+        if (client == null || client.level == null || !isCtrlDown(client)
+                || !sog$matchesConfigKey(event)) {
+            return false;
+        }
+        // 从界面里进来时把当前界面当父级：配置界面点“完成”会退回物品栏，而不是直接回到游戏。
+        client.setScreenAndShow(new WorldEaterConfigScreen(client.screen));
+        return true;
+    }
+
     /** Ctrl 是否按下（配合 E 打开配置界面）。 */
     private static boolean isCtrlDown(Minecraft client) {
-        return InputConstants.isKeyDown(client.getWindow(), GLFW.GLFW_KEY_LEFT_CONTROL)
-                || InputConstants.isKeyDown(client.getWindow(), GLFW.GLFW_KEY_RIGHT_CONTROL);
+        return InputConstants.isKeyDown(client.getWindow(), 341)
+                || InputConstants.isKeyDown(client.getWindow(), 345);
     }
 
     private static void clientTick(Minecraft client) {
@@ -308,7 +377,11 @@ public final class WorldEaterHelperVisualizer {
                     if (!markHidden && !isVisibleFromAbove(level, pos)) {
                         continue;
                     }
-                    marks.add(createMark(level, pos.immutable(), state, category));
+                    Mark mark = createMark(level, pos.immutable(), state, category);
+                    // 高度限制：幽灵被抬得太高（≥ 阈值）时不画，免得和本体对不上号。
+                    if (mark != null) {
+                        marks.add(mark);
+                    }
                     if (marks.size() >= MAX_CHUNK_MARKS) {
                         return marks;
                     }
@@ -396,6 +469,10 @@ public final class WorldEaterHelperVisualizer {
      * 本身还埋在实心方块里（机器压得太高，或者方块埋得深），就沿同一列往上找到第一格空位
      * 再画，免得方块模型整个陷在实心的东西里看不见。埋住的那些还会把描边和连接线设为
      * 始终置顶，从上往下看能透过地形找到它，也能顺线找回地下本体。
+     *
+     * <p>高度限制（{@code WorldEaterConfig.isHeightLimit()}，默认开）：抬升后与本体竖直
+     * 距离达到 {@code maxGhostLift}（默认 8 格）的方块返回 {@code null}，调用方据此跳过，
+     * 于是“抬得太高、已经对应不上本体”的幽灵不会画出来。</p>
      */
     private static Mark createMark(ClientLevel level, BlockPos pos, BlockState state, int category) {
         double x = pos.getX() + 0.5D;
@@ -422,6 +499,10 @@ public final class WorldEaterHelperVisualizer {
                 pos.getX() + 1.0D, ghostY + 1.0D, pos.getZ() + 1.0D).inflate(0.002D);
         boolean water = state.hasProperty(BlockStateProperties.WATERLOGGED)
                 && state.getValue(BlockStateProperties.WATERLOGGED);
+        if (WorldEaterConfig.isTooHigh(pos.getY(), ghostY)) {
+            // 抬升高度到了设定阈值：这块不渲染（默认 8 格，正常的 7 格抬升不受影响）。
+            return null;
+        }
         return new Mark(from, to, pos.immutable(), state, outline, ghostBox, ghostY, buried, water);
     }
 
@@ -438,10 +519,13 @@ public final class WorldEaterHelperVisualizer {
         if (!VisualizerState.isActive(RULE)) {
             return;
         }
+        refreshColors();
         Snapshot current = snapshot;
         if (current.marks.isEmpty()) {
             return;
         }
+        // 「真方块 ↔ 映射方块」距离标注（默认关闭）：在幽灵方块头顶写一行“x.x 格”。
+        boolean showDistance = WorldEaterConfig.isDistanceShown();
         try (Gizmos.TemporaryCollection collection = context.worldRenderer().collectPerFrameGizmos()) {
             for (int i = 0; i < current.marks.size(); i++) {
                 Mark mark = current.marks.get(i);
@@ -467,6 +551,21 @@ public final class WorldEaterHelperVisualizer {
                     line.setAlwaysOnTop();
                     box.setAlwaysOnTop();
                 }
+                if (showDistance) {
+                    // 幽灵中心 → 真方块中心的直线距离（同一列，所以就是竖直高度差）。
+                    double distance = mark.to.distanceTo(mark.from);
+                    GizmoProperties text = Gizmos.billboardText(
+                            Component.translatable("sog_carpet.ui.world_eater.distance_label",
+                                    String.format(java.util.Locale.ROOT, "%.1f", distance))
+                                    .getString(),
+                            new Vec3(mark.ghostBox.getCenter().x, mark.ghostBox.maxY + 0.45D,
+                                    mark.ghostBox.getCenter().z),
+                            TextGizmo.Style.forColor(mark.outline));
+                    if (mark.buried) {
+                        // 埋住的方块本来就靠置顶标记才能看见，距离文字也一起置顶。
+                        text.setAlwaysOnTop();
+                    }
+                }
             }
         }
     }
@@ -486,7 +585,7 @@ public final class WorldEaterHelperVisualizer {
         }
         Minecraft client = Minecraft.getInstance();
         ClientLevel level = client.level;
-        if (level == null) {
+        if (level == null || client.gameRenderer == null) {
             return;
         }
         Vec3 camera = client.gameRenderer.getMainCamera().position();
@@ -496,14 +595,16 @@ public final class WorldEaterHelperVisualizer {
             return;
         }
         BlockModelShaper shaper = client.getModelManager().getBlockModelShaper();
+        BlockRenderDispatcher dispatcher = client.getBlockRenderer();
+        // 同种方块复用一次解析结果，避免每个标记都重新拆模型。
         Map<BlockState, List<BlockModelPart>> cache = new HashMap<>();
         try {
             for (int i = 0; i < current.marks.size(); i++) {
-                Mark mark = current.marks.get(i);
+                final Mark mark = current.marks.get(i);
                 List<BlockModelPart> parts = cache.get(mark.state);
                 if (parts == null) {
-                    BlockStateModel blockModel = shaper.getBlockModel(mark.state);
-                    parts = blockModel.collectParts(RandomSource.create(mark.pos.asLong()));
+                    BlockStateModel model = shaper.getBlockModel(mark.state);
+                    parts = model.collectParts(RandomSource.create(mark.pos.asLong()));
                     cache.put(mark.state, parts);
                 }
                 final List<BlockModelPart> modelParts = parts;
@@ -512,11 +613,11 @@ public final class WorldEaterHelperVisualizer {
                     poseStack.translate(mark.pos.getX() - camera.x,
                             mark.ghostY - camera.y,
                             mark.pos.getZ() - camera.z);
-                    // 幽灵方块本体走延迟几何提交，渲染类型与原版移动方块一致；
-                    // 属性色描边统一走 renderGizmos 里的立方体线框，不吃贴图 alpha。
+                    // 最后一个参数是模型自带的描边通道，这里传 false 关掉：描边统一走
+                    // renderGizmos 里的立方体线框，避免贴图透明像素把描边遮掉。
                     DeferredGeometry.submit(collector, poseStack, RenderTypes.solidMovingBlock(),
-                            (local, consumer) -> client.getBlockRenderer().renderBatched(
-                                    mark.state, mark.pos, level, local, consumer, false, modelParts));
+                            (pose, consumer) -> dispatcher.renderBatched(mark.state, mark.pos,
+                                    level, pose, consumer, true, modelParts));
                 } finally {
                     poseStack.popPose();
                 }

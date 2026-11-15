@@ -13,7 +13,7 @@ import net.minecraft.network.chat.Component;
  * <p>26.2 的控件不再走 {@code renderWidget(GuiGraphics,...)}，而是“提取渲染状态”：
  * 覆写 {@link #renderWidget(GuiGraphics, int, int, float)}
  * 往 {@code GuiGraphics} 里写填充矩形与文字。鼠标事件也换成了
- * MouseButtonEvent 记录类。</p>
+ * {@link MouseButtonEvent} 记录类。</p>
  *
  * <p>左键拖动/点击取值 min..max，数值变化通过回调发往服务端。滑条自身的最大值/最小值
  * 由调用方按原版游戏设置的范围传入，手柄旁会直接标出当前数字。</p>
@@ -28,6 +28,16 @@ public final class VerticalDistanceSlider extends AbstractWidget {
     private final int color;
     private final IntConsumer onChange;
     private int value;
+
+    /**
+     * 正在被拖动的滑条（{@code null} 表示没有）。
+     *
+     * <p>1.21 ~ 1.21.8 的 {@code AbstractContainerScreen#mouseDragged} 不管鼠标在哪都直接
+     * {@code return true}，从不调用 {@code super.mouseDragged(...)}，于是原版“把拖动交给焦点控件”
+     * 的那条分发在容器界面里根本走不到滑条上：滑条只能点、拖不动。所以自己记住按下去的是哪一条，
+     * 由 {@code AbstractContainerScreenMixin} 在 {@code mouseDragged} 的开头转给我们。</p>
+     */
+    private static VerticalDistanceSlider sog$dragging;
 
     public VerticalDistanceSlider(int x, int y, int width, int height, int min, int max,
             int initialValue, Component label, int color, IntConsumer onChange) {
@@ -107,7 +117,36 @@ public final class VerticalDistanceSlider extends AbstractWidget {
         if (button != 0) {
             return false;
         }
+        // 记住按下的这一条：容器界面不会把后续拖动转发给控件（见 sog$dragging 的说明）。
+        sog$dragging = this;
         applyValue(yToValue(mouseY));
+        return true;
+    }
+
+    /** 把一次拖动应用到这条滑条上（由容器界面的 {@code mouseDragged} 转发进来）。 */
+    public boolean sog$dragTo(double mouseX, double mouseY) {
+        if (!this.active || !this.visible) {
+            return false;
+        }
+        applyValue(yToValue(mouseY));
+        return true;
+    }
+
+    /** 当前正在被拖动的滑条；没有则为 {@code null}。 */
+    public static VerticalDistanceSlider sog$draggingSlider() {
+        return sog$dragging;
+    }
+
+    /** 结束拖动（鼠标松开、或者界面层认为该收尾时调用）。 */
+    public static void sog$stopDragging() {
+        sog$dragging = null;
+    }
+
+    @Override
+    public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (sog$dragging == this) {
+            sog$dragging = null;
+        }
         return true;
     }
 

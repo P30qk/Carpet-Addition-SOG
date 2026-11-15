@@ -4,9 +4,13 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import cn.blockforge.generated.sogcarpet.client.render.WorldRenderContext;
+import cn.blockforge.generated.sogcarpet.client.render.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import cn.blockforge.generated.sogcarpet.client.gizmo.GizmoStyle;
+import cn.blockforge.generated.sogcarpet.client.gizmo.Gizmos;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.boss.wither.WitherBoss;
@@ -35,9 +39,9 @@ public final class WitherBreakRangeVisualizer {
     private static final int SCAN_INTERVAL_TICKS = 5;
 
     /** lucidity 默认色 wither_destruction_range_color：(255, 0, 0)，alpha 100。 */
-    private static final int COLOR_RANGE_FILL = 0x64FF0000;
+    private static int COLOR_RANGE_FILL = 0x64FF0000;
     /** 范围立方体的描边（亮红，几乎不透明）：加一圈棱之后从任何角度都能一眼看出范围。 */
-    private static final int COLOR_RANGE_STROKE = 0xE6FF6B6B;
+    private static int COLOR_RANGE_STROKE = 0xE6FF6B6B;
     /** 描边宽度。 */
     private static final float RANGE_STROKE_WIDTH = 2.5F;
     /** 边界往外让一点：范围立方体的六个面正好落在整数方块面上，和世界方块共面会
@@ -53,7 +57,7 @@ public final class WitherBreakRangeVisualizer {
     /** 客户端入口调用一次：tick 扫描与渲染回调（Ctrl+O 总开关在 {@link VisualizerState}）。 */
     public static void init() {
         ClientTickEvents.END_CLIENT_TICK.register(WitherBreakRangeVisualizer::clientTick);
-        SogRenderEvents.register(WitherBreakRangeVisualizer::renderGizmos);
+        WorldRenderEvents.BEFORE_DEBUG_RENDER.register(WitherBreakRangeVisualizer::renderGizmos);
     }
 
     private static void clientTick(Minecraft client) {
@@ -92,10 +96,17 @@ public final class WitherBreakRangeVisualizer {
         return new Snapshot(boxes);
     }
 
-    private static void renderGizmos(SogWorldRenderContext context) {
+    /** 从用户配置刷新本规则的配色；每帧渲染前调用一次，允许运行时改色。 */
+    private static void refreshColors() {
+        COLOR_RANGE_FILL = VisualizerConfig.color("witherBreakRangeVisualizer", "rangeFill", 0x64FF0000);
+        COLOR_RANGE_STROKE = VisualizerConfig.color("witherBreakRangeVisualizer", "rangeStroke", 0xE6FF6B6B);
+    }
+
+    private static void renderGizmos(WorldRenderContext context) {
         if (!VisualizerState.isActive(RULE)) {
             return;
         }
+        refreshColors();
         Snapshot current = snapshot;
         if (current.boxes.isEmpty()) {
             return;

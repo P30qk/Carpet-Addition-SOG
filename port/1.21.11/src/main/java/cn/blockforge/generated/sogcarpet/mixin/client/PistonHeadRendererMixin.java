@@ -45,11 +45,13 @@ public abstract class PistonHeadRendererMixin {
     /** 本可视化在总控里的规则名。 */
     private static final String RULE = "b36TargetPreview";
 
+    // require = 0：这条预览只是“提前看到方块会停在哪一格”的锦上添花；
+    // 万一原版又改了这个方法的签名，丢的只是这条预览，绝不让客户端因 mixin apply 失败而黑屏。
     @Inject(method = "submit(Lnet/minecraft/client/renderer/blockentity/state/PistonHeadRenderState;"
             + "Lcom/mojang/blaze3d/vertex/PoseStack;"
             + "Lnet/minecraft/client/renderer/SubmitNodeCollector;"
             + "Lnet/minecraft/client/renderer/state/CameraRenderState;)V",
-            at = @At("TAIL"))
+            at = @At("TAIL"), require = 0)
     private void sogcarpet$b36Preview(PistonHeadRenderState state, PoseStack poseStack,
             SubmitNodeCollector collector, CameraRenderState camera, CallbackInfo ci) {
         if (!VisualizerState.isActive(RULE)) {

@@ -1,6 +1,6 @@
 package cn.blockforge.generated.sogcarpet.mixin;
 
-import cn.blockforge.generated.sogcarpet.SogSettings;
+import cn.blockforge.generated.sogcarpet.SogRecipeBook;
 import java.util.Optional;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.crafting.Recipe;
@@ -8,10 +8,12 @@ import net.minecraft.world.item.crafting.RecipeHolder;
 import net.minecraft.world.item.crafting.RecipeInput;
 import net.minecraft.world.item.crafting.RecipeManager;
 import net.minecraft.world.item.crafting.RecipeType;
+import net.minecraft.world.item.crafting.display.RecipeDisplayEntry;
 import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
@@ -43,13 +45,35 @@ public abstract class RecipeManagerMixin {
         }
     }
 
-    /** 配方名 → 启用它的规则。规则默认全部关闭。 */
+    /**
+     * 配方名 → 启用它的规则。
+     *
+     * <p>判断逻辑统一放在 {@link SogRecipeBook#isEnabled(String)}：{@link SogRecipeBook} 在
+     * 规则变化时会用它决定给玩家补解锁哪些配方，两处必须完全一致，否则会出现“配方书里有、
+     * 工作台合不出来”或反过来的矛盾。</p>
+     */
     private static boolean sog$isEnabled(String path) {
-        return switch (path) {
-            case "tinted_glass_easy" -> SogSettings.tintedGlassEasyCraft;
-            case "simple_elytra" -> SogSettings.easyElytraCraft;
-            case "snow_from_block" -> SogSettings.snowCraftable;
-            default -> true;
-        };
+        return SogRecipeBook.isEnabled(path);
+    }
+
+    /**
+     * 配方书（含 EasierCrafting 这类读取配方书的模组）的规则门控。
+     *
+     * <p>26.2 的配方书不再下发完整配方表，而是让服务端把这些玩家<b>已解锁</b>的配方逐条解析成
+     * {@code RecipeDisplayEntry} 再发过去；{@link RecipeManager#listDisplaysForRecipe} 就是
+     * 那个“一条配方 → 若干展示条目”的唯一出口（配方书首包、后补解锁都走它）。本模组自带的
+     * 配方由 {@code data/sog_carpet/advancement/recipes/*.json} 解锁，这里在规则关闭时干脆
+     * 不投递任何条目，于是原版配方书与 EasierCrafting 都看不到这条配方——不会出现“界面里能点、
+     * 放进工作台却合不出来”的矛盾。</p>
+     */
+    @Inject(method = "listDisplaysForRecipe", at = @At("HEAD"), cancellable = true)
+    private void sog$gateRecipeBookDisplays(
+            net.minecraft.resources.ResourceKey<Recipe<?>> recipe,
+            java.util.function.Consumer<RecipeDisplayEntry> consumer,
+            CallbackInfo ci) {
+        ResourceLocation id = recipe.location();
+        if ("sog_carpet".equals(id.getNamespace()) && !sog$isEnabled(id.getPath())) {
+            ci.cancel();
+        }
     }
 }

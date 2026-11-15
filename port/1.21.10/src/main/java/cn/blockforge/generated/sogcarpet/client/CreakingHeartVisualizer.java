@@ -13,6 +13,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
+import cn.blockforge.generated.sogcarpet.client.gizmo.GizmoStyle;
+import cn.blockforge.generated.sogcarpet.client.gizmo.Gizmos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.monster.creaking.Creaking;
 import net.minecraft.world.phys.Vec3;
@@ -40,11 +42,11 @@ public final class CreakingHeartVisualizer {
     /** 一次攻击之后红框与黄线保留的 tick 数；与原版嘎吱之心受击后喷粒子的时长一致。 */
     private static final int SHOW_TICKS = 100;
     /** 嘎吱之心方块的框色（红）。 */
-    private static final int COLOR_HEART = 0xFFFF3B30;
+    private static int COLOR_HEART = 0xFFFF3B30;
     /** 红框的淡填充色（同色相、低 alpha），让框内的方块也看得清楚。 */
-    private static final int COLOR_HEART_FILL = 0x33FF3B30;
+    private static int COLOR_HEART_FILL = 0x33FF3B30;
     /** 嘎吱之心与嘎吱怪之间的连线颜色（黄）。 */
-    private static final int COLOR_LINK = 0xFFFFE14D;
+    private static int COLOR_LINK = 0xFFFFE14D;
     /** 方块框往外套一点，避免和方块自己的面重合导致闪烁 / 特定角度看不见。 */
     private static final float HEART_INFLATE = 0.004F;
     /** 框线和连线都加粗一档，远看也清楚。 */
@@ -109,10 +111,18 @@ public final class CreakingHeartVisualizer {
         snapshot = new Snapshot(links);
     }
 
+    /** 从用户配置刷新本规则的配色；每帧渲染前调用一次，允许运行时改色。 */
+    private static void refreshColors() {
+        COLOR_HEART = VisualizerConfig.color("creakingHeartVisualizer", "heart", 0xFFFF3B30);
+        COLOR_HEART_FILL = VisualizerConfig.color("creakingHeartVisualizer", "heartFill", 0x33FF3B30);
+        COLOR_LINK = VisualizerConfig.color("creakingHeartVisualizer", "link", 0xFFFFE14D);
+    }
+
     private static void renderGizmos(WorldRenderContext context) {
         if (!VisualizerState.isActive(RULE)) {
             return;
         }
+        refreshColors();
         Snapshot current = snapshot;
         if (current.links.isEmpty()) {
             return;

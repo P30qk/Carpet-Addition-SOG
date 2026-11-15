@@ -11,7 +11,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 /**
  * 天气的服务端收口点。
  *
- * <p>{@code tickThunder} 是雷雨期间生成闪电（以及骷髅马陷阱）的唯一入口，整段取消即可禁落雷。</p>
+ * <p>{@code tickThunder} 是雷雨期间生成闪电（以及骷髅马陷阱）的唯一入口，整段取消即可禁落雷。
+ * 1.21.3 里这一逻辑还挤在 {@code tickChunk} 中，1.21.5 起已经单独拆成 {@code tickThunder(LevelChunk)}，
+ * 所以这里回到最干净的写法。</p>
  *
  * <p><b>关于 {@code @Redirect}（重要，改注入点时先读这段）：</b>26.2 工具链
  * （sponge-mixin 0.17.4）里 {@code @Redirect.at()} 是数组签名，编出的字节码把 {@code at}

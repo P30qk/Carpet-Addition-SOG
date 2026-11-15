@@ -23,6 +23,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  */
 @Mixin(LivingEntity.class)
 public abstract class NitwitSleepMixin {
+    // 26.3 的 startSleeping 变成返回 boolean（是否真的躺下），取消时要显式给个 false。
     @Inject(method = "startSleeping", at = @At("HEAD"), cancellable = true)
     private void sog$denyNitwitSleep(BlockPos pos, CallbackInfoReturnable<Boolean> cir) {
         if (!SogSettings.nitwitBedDisabled) {
@@ -30,7 +31,6 @@ public abstract class NitwitSleepMixin {
         }
         if ((Object) this instanceof Villager villager
                 && villager.getVillagerData().profession().is(VillagerProfession.NITWIT)) {
-            // 26.3 起 startSleeping 返回 boolean：拒绝入睡时返回 false，原版不会把它挪上床。
             cir.setReturnValue(false);
         }
     }

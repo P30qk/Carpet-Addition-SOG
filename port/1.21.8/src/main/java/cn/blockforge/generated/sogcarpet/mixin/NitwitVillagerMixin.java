@@ -40,8 +40,8 @@ public abstract class NitwitVillagerMixin {
         Villager self = (Villager) (Object) this;
         VillagerData data = self.getVillagerData();
         if (data.profession().is(VillagerProfession.NITWIT)) {
-            // 26.2 里职业是注册表条目：VillagerProfession.NONE 是 ResourceKey，
-            // 要从内置注册表取出对应的 Holder 才能写回 VillagerData（原版同样写法）。
+            // 1.21.5 起 VillagerData 里的职业是注册表条目（Holder），
+            // 和原版一样从内置注册表取出 NONE 的 Holder 再写回。
             self.setVillagerData(data.withProfession(
                     BuiltInRegistries.VILLAGER_PROFESSION.getOrThrow(VillagerProfession.NONE)));
         }

@@ -48,7 +48,7 @@ public abstract class IceBlockMixin {
     }
 
     protected void neighborChanged(BlockState state, Level level, BlockPos pos, Block neighborBlock,
-            BlockPos fromPos, boolean movedByPiston) {
+            BlockPos neighborPos, boolean movedByPiston) {
         if (sogcarpet$shouldInstantMelt(level, pos)) {
             this.melt(state, level, pos);
         }

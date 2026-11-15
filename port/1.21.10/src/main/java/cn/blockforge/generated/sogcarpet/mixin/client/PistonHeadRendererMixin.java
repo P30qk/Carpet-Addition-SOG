@@ -31,7 +31,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * {@link TransparentVertexConsumer}——它把所有顶点的 alpha 压成
  * {@value TransparentVertexConsumer#ALPHA}，于是这份“重影”是半透明的，能提前看到
  * 方块会停在哪一格。几何通过 {@link DeferredGeometry} 按
- * {@link RenderTypes#translucentMovingBlock()} 提交，和原版移动方块用同一套渲染类型。</p>
+ * {@link RenderType#translucentMovingBlock()} 提交，和原版移动方块用同一套渲染类型。</p>
  *
  * <p><b>关键：这里不能再叠加位移。</b>原版 {@code submit} 把
  * {@code (xOffset, yOffset, zOffset)} 的位移 push/pop 得很干净，TAIL 时姿态已经回到
@@ -45,11 +45,13 @@ public abstract class PistonHeadRendererMixin {
     /** 本可视化在总控里的规则名。 */
     private static final String RULE = "b36TargetPreview";
 
+    // require = 0：这条预览只是“提前看到方块会停在哪一格”的锦上添花；
+    // 万一原版又改了这个方法的签名，丢的只是这条预览，绝不让客户端因 mixin apply 失败而黑屏。
     @Inject(method = "submit(Lnet/minecraft/client/renderer/blockentity/state/PistonHeadRenderState;"
             + "Lcom/mojang/blaze3d/vertex/PoseStack;"
             + "Lnet/minecraft/client/renderer/SubmitNodeCollector;"
             + "Lnet/minecraft/client/renderer/state/CameraRenderState;)V",
-            at = @At("TAIL"))
+            at = @At("TAIL"), require = 0)
     private void sogcarpet$b36Preview(PistonHeadRenderState state, PoseStack poseStack,
             SubmitNodeCollector collector, CameraRenderState camera, CallbackInfo ci) {
         if (!VisualizerState.isActive(RULE)) {

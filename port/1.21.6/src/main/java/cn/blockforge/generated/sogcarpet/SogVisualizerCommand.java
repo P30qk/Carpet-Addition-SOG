@@ -27,7 +27,7 @@ import net.minecraft.server.level.ServerPlayer;
  * </pre>
  *
  * <p>不带玩家参数时作用于自己，任何玩家都能改自己的清单；带玩家参数改别人需要
- * OP2（OP2）。</p>
+ * OP2（{@link Permissions#COMMANDS_GAMEMASTER}）。</p>
  */
 public final class SogVisualizerCommand {
     private SogVisualizerCommand() {
@@ -56,7 +56,15 @@ public final class SogVisualizerCommand {
                         .then(Commands.literal("reset")
                                 .executes(ctx -> reset(ctx, self(ctx)))
                                 .then(Commands.argument("player", EntityArgument.player())
-                                        .executes(ctx -> reset(ctx, EntityArgument.getPlayer(ctx, "player")))))));
+                                        .executes(ctx -> reset(ctx, EntityArgument.getPlayer(ctx, "player")))))
+                        .then(Commands.literal("reset")
+                                .executes(ctx -> reset(ctx, self(ctx)))
+                                .then(Commands.argument("player", EntityArgument.player())
+                                        .executes(ctx -> reset(ctx, EntityArgument.getPlayer(ctx, "player"))))))
+                // 信标效果黑白名单（Op）：/sogcarpet beaconfilter ...
+                .then(SogBeaconCommand.build())
+                // 随身信标（给纯原版客户端 / 服务端测试用）：/sogcarpet portablebeacon <效果> [第二个]
+                .then(SogBeaconCommand.portable()));
     }
 
     private static ServerPlayer self(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {

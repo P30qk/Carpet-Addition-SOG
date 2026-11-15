@@ -8,6 +8,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import cn.blockforge.generated.sogcarpet.client.gizmo.GizmoStyle;
+import cn.blockforge.generated.sogcarpet.client.gizmo.Gizmos;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
@@ -155,8 +157,8 @@ public final class FlexiblePlacementCorners {
         Vec3 plain = hitVec.add(offset);
         Direction second = secondAxis((int) Math.round(offset.x), (int) Math.round(offset.y),
                 (int) Math.round(offset.z));
-        return second == null ? plain
-                : plain.add(new Vec3(second.getStepX(), second.getStepY(), second.getStepZ()));
+        // 1.21.x 的 Direction 没有 getUnitVec3()（1.21.2+ 才加），用同样的单位法向量代替。
+        return second == null ? plain : plain.add(Vec3.atLowerCornerOf(second.getNormal()));
     }
 
     /**

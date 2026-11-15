@@ -1,0 +1,71 @@
+package cn.blockforge.generated.sogcarpet.itemflow.mixin.Inventory;
+
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
+
+import cn.blockforge.generated.sogcarpet.itemflow.track.HighlightManager;
+import cn.blockforge.generated.sogcarpet.itemflow.track.Nesting;
+import cn.blockforge.generated.sogcarpet.itemflow.track.TrackMark;
+import cn.blockforge.generated.sogcarpet.itemflow.track.Tracking;
+import net.minecraft.core.Direction;
+import net.minecraft.world.Container;
+import net.minecraft.world.entity.item.ItemEntity;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.entity.HopperBlockEntity;
+
+@Mixin(HopperBlockEntity.class)
+public abstract class HopperBlockEntityMixin {
+	@Inject(
+			method = "addItem(Lnet/minecraft/world/Container;Lnet/minecraft/world/entity/item/ItemEntity;)Z",
+			at = @At("RETURN")
+	)
+	private static void itemflowtracker$pickedUpFrom(Container container, ItemEntity itemEntity, CallbackInfoReturnable<Boolean> cir) {
+		HighlightManager.onEnterContainer(container, itemEntity.position());
+	}
+
+	@Inject(
+			method = "addItem(Lnet/minecraft/world/Container;Lnet/minecraft/world/Container;Lnet/minecraft/world/item/ItemStack;Lnet/minecraft/core/Direction;)Lnet/minecraft/world/item/ItemStack;",
+			at = @At("RETURN")
+	)
+	private static void itemflowtracker$refundRejected(Container source, Container target, ItemStack stack, Direction direction, CallbackInfoReturnable<ItemStack> cir) {
+		ItemStack rejected = cir.getReturnValue();
+
+		if (rejected != null && !rejected.isEmpty()) {
+			Tracking.returned(rejected);
+		}
+	}
+
+	@Inject(
+			method = "tryMoveInItem",
+			at = @At(value = "INVOKE", target = "Lnet/minecraft/world/Container;setItem(ILnet/minecraft/world/item/ItemStack;)V", shift = At.Shift.AFTER)
+	)
+	private static void itemflowtracker$movedWholeStack(Container source, Container target, ItemStack stack, int slot, Direction direction, CallbackInfoReturnable<ItemStack> cir) {
+		if (Tracking.getRaw(stack) != null) {
+			Tracking.moved(stack);
+		}
+
+		if (Nesting.carriesMark(stack)) {
+			HighlightManager.onEnterContainer(target, HighlightManager.positionOf(source));
+		}
+	}
+
+	@Inject(
+			method = "tryMoveInItem",
+			at = @At(value = "INVOKE", target = "Lnet/minecraft/world/item/ItemStack;shrink(I)V")
+	)
+	private static void itemflowtracker$mergedIntoSlot(Container source, Container target, ItemStack stack, int slot, Direction direction, CallbackInfoReturnable<ItemStack> cir) {
+		TrackMark mark = Tracking.getRaw(stack);
+
+		if (mark != null) {
+			ItemStack destination = target.getItem(slot);
+			int moved = Math.min(stack.getCount(), stack.getMaxStackSize() - destination.getCount());
+			Tracking.arrive(destination, mark, moved);
+		}
+
+		if (Nesting.carriesMark(stack)) {
+			HighlightManager.onEnterContainer(target, HighlightManager.positionOf(source));
+		}
+	}
+}

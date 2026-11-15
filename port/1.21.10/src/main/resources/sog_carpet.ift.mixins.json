@@ -1,0 +1,25 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "cn.blockforge.generated.sogcarpet.itemflow.mixin",
+  "compatibilityLevel": "JAVA_17",
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "mixins": [
+    "Inventory.AbstractContainerMenuMixin",
+    "Inventory.ContainersMixin",
+    "Inventory.HopperBlockEntityMixin",
+    "Inventory.InventoryMixin",
+    "accessors.BlockDisplayAccessor",
+    "accessors.CompoundContainerAccessor",
+    "accessors.DisplayAccessor",
+    "accessors.ItemDisplayAccessor",
+    "block.BlockMixin",
+    "entity.LivingEntityDropMixin",
+    "item.BlockItemMixin",
+    "item.ItemEntityMixin",
+    "item.ItemStackMixin",
+    "item.ItemUtilsMixin"
+  ]
+}

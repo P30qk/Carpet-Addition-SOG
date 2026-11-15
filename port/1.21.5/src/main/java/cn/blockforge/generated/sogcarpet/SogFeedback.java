@@ -51,6 +51,16 @@ public final class SogFeedback {
         switch (name) {
             case "copperOxidationDisabled":
                 return ParticleTypes.ELECTRIC_SPARK;
+            case "dispenserCopperScrape":
+                return ParticleTypes.SCRAPE;
+            case "dispenserTilling":
+                return ParticleTypes.COMPOSTER;
+            case "dispenserPlanting":
+                return ParticleTypes.HAPPY_VILLAGER;
+            case "dispenserBerryHarvest":
+                return ParticleTypes.GLOW;
+            case "chorusFlowerBonemeal":
+                return ParticleTypes.END_ROD;
             case "amethystBudGrowthLimit":
                 return ParticleTypes.END_ROD;
             case "iceSnowMeltDisabled":
@@ -78,8 +88,15 @@ public final class SogFeedback {
                 return ParticleTypes.END_ROD;
             case "easyElytraCraft":
                 return ParticleTypes.CLOUD;
-            case "beaconExtraEffects":
+            case "customBeaconEffects":
+            case "portableBeacon":
+            case "beaconEffectFilterMode":
+            case "beaconEffectBlacklist":
+            case "beaconEffectWhitelist":
                 return ParticleTypes.ENCHANT;
+            case "lightningTurnsClay":
+            case "lightningRangeVisualizer":
+                return ParticleTypes.ELECTRIC_SPARK;
             case "sculkRangeVisualizer":
                 return ParticleTypes.SCULK_SOUL;
             case "creakingHeartVisualizer":

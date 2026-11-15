@@ -13,6 +13,8 @@ import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.world.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
+import net.minecraft.core.BlockPos;
+import cn.blockforge.generated.sogcarpet.client.gizmo.Gizmos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.phys.Vec3;
@@ -58,7 +60,7 @@ public final class MobSpawnVisualizer {
     /** 同时最多跟踪多少只生物（就近优先）。 */
     private static final int MAX_TRAILS = 48;
     /** 生物看不见或走出范围后，轨迹再淡出这么多 tick 才彻底移除。 */
-    private static final int FADE_TICKS = 40;
+    private static final int FADE_TICKS = 80;
     /** 服务端出生点的暂存上限：等客户端真看到生物时才用它当起点。 */
     private static final int MAX_SPAWN_POINTS = 512;
     /** 一帧最多画多少图元，兜住极限刷怪塔。 */
@@ -82,13 +84,13 @@ public final class MobSpawnVisualizer {
     private static final double Y_OFFSET = 0.12D;
 
     /** 起点粗点：亮绿。 */
-    private static final int COLOR_START = 0xFF35FF6A;
+    private static int COLOR_START = 0xFF35FF6A;
     /** 行走过程线：近白。 */
-    private static final int COLOR_PATH = 0xFFE6F2FF;
+    private static int COLOR_PATH = 0xFFE6F2FF;
     /** 过程箭头：黄。 */
-    private static final int COLOR_ARROW = 0xFFFFE24A;
+    private static int COLOR_ARROW = 0xFFFFE24A;
     /** 终点箭头：红。 */
-    private static final int COLOR_HEAD = 0xFFFF4136;
+    private static int COLOR_HEAD = 0xFFFF4136;
 
     /** 本规则在总控里的名字。 */
     private static final String RULE = "mobSpawnVisualizer";
@@ -134,6 +136,12 @@ public final class MobSpawnVisualizer {
                 SPAWN_POINTS.put(event.entityId(), Vec3.atBottomCenterOf(event.spawnPos()));
             }
         }
+        // 怪物生成相关的成功率标签/高度柱、随机游走路径分别属于 spawnStatsVisualizer 与
+        // randomWalkVisualizer 两条独立规则，交给它们处理。
+        for (SogSpawnTrace.SpawnEvent event : payload.events()) {
+            SpawnStatsVisualizer.noteSpawn(event);
+            RandomWalkVisualizer.noteSpawn(event);
+        }
     }
 
     private static void clientTick(Minecraft client) {
@@ -148,7 +156,7 @@ public final class MobSpawnVisualizer {
             lastLevel = level;
         }
         Vec3 eye = client.player == null ? null : client.player.position();
-        updateTrails(level, eye);
+        updateTrails(level, eye, VisualizerState.tickFrozen(client));
         snapshot = new Snapshot(buildPrimitives());
     }
 
@@ -173,8 +181,13 @@ public final class MobSpawnVisualizer {
      * {@link Mob}、没被移除、又在 {@link #TRACK_RANGE} 以内的就认领或新建一条轨迹并采样；
      * 没被认领的（死了、走远了、区块卸载了）开始倒计时淡出。轨迹数有上限，超了就不再新建，
      * 于是刷怪塔里也不会为了几万只怪堆内存。</p>
+     *
+     * <p>{@code frozen} 为真（/tick freeze、/tick step）时不推进采样与淡出，把画面停在那一刻。</p>
      */
-    private static void updateTrails(ClientLevel level, Vec3 eye) {
+    private static void updateTrails(ClientLevel level, Vec3 eye, boolean frozen) {
+        if (frozen) {
+            return;
+        }
         for (MobTrail trail : TRAILS.values()) {
             trail.seen = false;
         }
@@ -230,6 +243,14 @@ public final class MobSpawnVisualizer {
             appendTrail(trail, out);
         }
         return out;
+    }
+
+    /** 每次绘制前把配色从配置读进来。 */
+    private static void refreshColors() {
+        COLOR_START = VisualizerConfig.color(RULE, "start", 0xFF35FF6A);
+        COLOR_PATH = VisualizerConfig.color(RULE, "path", 0xFFE6F2FF);
+        COLOR_ARROW = VisualizerConfig.color(RULE, "arrow", 0xFFFFE24A);
+        COLOR_HEAD = VisualizerConfig.color(RULE, "head", 0xFFFF4136);
     }
 
     /**
@@ -330,6 +351,7 @@ public final class MobSpawnVisualizer {
         if (!VisualizerState.isActive(RULE)) {
             return;
         }
+        refreshColors();
         Snapshot current = snapshot;
         if (current.primitives.isEmpty()) {
             return;

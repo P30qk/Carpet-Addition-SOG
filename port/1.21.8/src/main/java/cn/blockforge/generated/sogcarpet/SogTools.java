@@ -18,12 +18,13 @@ import net.minecraft.world.item.TridentItem;
 /**
  * “什么算工具”的统一判定，供“假人只拾取工具”规则使用。
  *
- * <p>覆盖用户列举的剑、斧、镐、铲、锄、弓、弩、矛、重锤、竿、剪，以及本轮新增的
- * <b>打火石</b>。判定分两层：</p>
+ * <p>覆盖用户列举的剑、斧、镐、铲、锄、弓、弩、三叉戟、重锤、竿、剪，以及本轮新增的
+ * <b>打火石</b>。1.21.10 还没有长矛，原先的“矛”类别改由三叉戟独占（对应语言键也随之改名）。
+ * 判定分两层：</p>
  * <ol>
- *   <li><b>物品标签</b>：剑/斧/镐/铲/锄/矛走
+ *   <li><b>物品标签</b>：剑/斧/镐/铲/锄走
  *       {@link ItemTags#SWORDS}、{@link ItemTags#AXES}、{@link ItemTags#PICKAXES}、
- *       {@link ItemTags#SHOVELS}、{@link ItemTags#HOES}、{@link ItemTags#SPEARS}，
+ *       {@link ItemTags#SHOVELS}、{@link ItemTags#HOES}，
  *       别的模组用同标签追加的工具也能认出来。26.2 里剑和镐没有专门的物品类
  *       （没有 {@code SwordItem}/{@code PickaxeItem}），这三个标签是唯一可靠的判据。</li>
  *   <li><b>类/ID 兜底</b>：弓、弩、重锤、钓鱼竿、剪刀、三叉戟、打火石按物品类判定，
@@ -48,7 +49,7 @@ public final class SogTools {
     public static final int HOE = 4;
     public static final int BOW = 5;
     public static final int CROSSBOW = 6;
-    public static final int SPEAR = 7;
+    public static final int TRIDENT = 7;
     public static final int MACE = 8;
     public static final int FISHING_ROD = 9;
     public static final int SHEARS = 10;
@@ -62,7 +63,7 @@ public final class SogTools {
     private static final String[] LABEL_KEYS = {
         "sog_carpet.ui.tools.sword", "sog_carpet.ui.tools.axe", "sog_carpet.ui.tools.pickaxe",
         "sog_carpet.ui.tools.shovel", "sog_carpet.ui.tools.hoe", "sog_carpet.ui.tools.bow",
-        "sog_carpet.ui.tools.crossbow", "sog_carpet.ui.tools.spear", "sog_carpet.ui.tools.mace",
+        "sog_carpet.ui.tools.crossbow", "sog_carpet.ui.tools.trident", "sog_carpet.ui.tools.mace",
         "sog_carpet.ui.tools.rod", "sog_carpet.ui.tools.shears", "sog_carpet.ui.tools.flint"
     };
 
@@ -113,7 +114,7 @@ public final class SogTools {
             mask |= 1 << SHEARS;
         }
         if (item instanceof TridentItem) {
-            mask |= 1 << SPEAR;
+            mask |= 1 << TRIDENT;
         }
         if (item instanceof FlintAndSteelItem) {
             mask |= 1 << FLINT_AND_STEEL;
@@ -136,9 +137,6 @@ public final class SogTools {
         if (path.endsWith("_hoe")) {
             mask |= 1 << HOE;
         }
-        if (path.endsWith("_spear")) {
-            mask |= 1 << SPEAR;
-        }
         if (path.equals("bow") || path.endsWith("_bow")) {
             mask |= 1 << BOW;
         }
@@ -155,7 +153,7 @@ public final class SogTools {
             mask |= 1 << SHEARS;
         }
         if (path.equals("trident") || path.endsWith("_trident")) {
-            mask |= 1 << SPEAR;
+            mask |= 1 << TRIDENT;
         }
         if (path.equals("flint_and_steel") || path.endsWith("_flint_and_steel")) {
             mask |= 1 << FLINT_AND_STEEL;
